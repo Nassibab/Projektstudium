@@ -1,0 +1,16 @@
+version: "3.9"
+
+services:
+  api:
+    build: ./services/api
+    container_name: groupproject_api
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  frontend:
+    build: ./services/frontend
+    container_name: groupproject_frontend
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
