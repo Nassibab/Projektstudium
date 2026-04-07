@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+echo "Checking Docker availability..."
+if ! docker info > /dev/null 2>&1; then
+  echo "Docker is not running or not available. Please start Docker Desktop / Docker Engine and try again."
+  exit 1
+fi
+
 echo "Building API, Frontend, and starting containers..."
 docker compose build --no-cache
 
