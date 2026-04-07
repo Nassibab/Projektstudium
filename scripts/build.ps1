@@ -1,6 +1,19 @@
 # PowerShell script to build and start Docker services on Windows
 # Equivalent to build.sh
 
+# Check Docker availability
+if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+    Write-Host "Docker is not installed or not on PATH. Please install Docker and ensure 'docker' is available."
+    exit 1
+}
+
+try {
+    docker info > $null 2>&1
+} catch {
+    Write-Host "Docker is not running or cannot be accessed. Please start Docker Desktop / Docker Engine and try again."
+    exit 1
+}
+
 # Check and generate package-lock.json if missing
 if (!(Test-Path "services/frontend/package-lock.json")) {
     Write-Host "Generating package-lock.json for frontend (this may take a few minutes)..."
