@@ -4,6 +4,11 @@ services:
     container_name: groupproject_api
     ports:
       - "8000:8000"
+    depends_on:
+      - mongodb
+    environment:
+      - MONGO_URI=mongodb://mongodb:27017
+      - MONGO_DB=shitstorm_db
     restart: unless-stopped
 
   frontend:
@@ -12,3 +17,15 @@ services:
     ports:
       - "3000:3000"
     restart: unless-stopped
+
+  mongodb:
+    image: mongodb/mongodb-community-server:latest
+    container_name: groupproject_mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    restart: unless-stopped
+
+volumes:
+  mongodb_data:
