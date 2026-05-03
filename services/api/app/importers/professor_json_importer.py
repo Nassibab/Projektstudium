@@ -1,4 +1,6 @@
+import os
 import json
+from pathlib import Path
 from app.db.mongo import MongoDB
 
 
@@ -8,43 +10,61 @@ def import_json():
     threads_collection = mongo.collection("threads")
     comments_collection = mongo.collection("comments")
 
-    file_path = "/app/app/data/synthetic_shitstorm_dataset.json"
+    folder_path = Path(__file__).resolve().parent.parent / "data"
 
-    with open(file_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    all_threads = []
+    all_comments = []
 
-    threads = data["threads"]
+    print("Importiere aus:", folder_path)
 
-    for thread in threads:
-        thread_doc = {
-            "thread_id": thread["thread_id"],
-            "title": thread["title"],
-            "scenario_type": thread["scenario_type"],
-            "label_shitstorm": thread["label_shitstorm"],
-            "description": thread["description"]
-        }
+    for filename in os.listdir(folder_path):
+        if not filename.endswith(".json"):
+            continue
 
-        threads_collection.insert_one(thread_doc)
+        file_path = folder_path / filename
+        print("Datei:", file_path)
 
-        for msg in thread["comments"]:
-            msg_doc = {
-                "thread_id": thread["thread_id"],
-                "message_id": msg["id"],
-                "parent": msg["parent"],
-                "login": msg["login"],
-                "subject": msg.get("subject"),
-                "text": msg["text"],
-                "created": msg["created"],
-                "synthetic": msg.get("synthetic"),
-                "synthetic_role": msg.get("synthetic_role"),
-                "toxicity_level": msg.get("toxicity_level"),
-                "target_login": msg.get("target_login")
-            }
+        with open(file_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
 
-            comments_collection.insert_one(msg_doc)
+        for thread in data.get("threads", []):
+            thread_id = thread["thread_id"]
+
+            all_threads.append({
+                "thread_id": thread_id,
+                "title": thread.get("title"),
+                "scenario_type": thread.get("scenario_type"),
+                "label_shitstorm": thread.get("label_shitstorm"),
+                "description": thread.get("description"),
+                "source_file": filename,
+            })
+
+            for msg in thread.get("messages", []):
+                all_comments.append({
+                    "message_id": msg.get("id"),
+                    "thread_id": thread_id,
+                    "parent": msg.get("parent"),
+                    "login": msg.get("login"),
+                    "subject": msg.get("subject"),
+                    "text": msg.get("text"),
+                    "created": msg.get("created"),
+                    "synthetic": msg.get("synthetic"),
+                    "synthetic_role": msg.get("synthetic_role"),
+                    "toxicity_level": msg.get("toxicity_level"),
+                    "target_login": msg.get("target_login"),
+                    "source_file": filename,
+                })
+
+    if all_threads:
+        threads_collection.insert_many(all_threads)
+
+    if all_comments:
+        comments_collection.insert_many(all_comments)
+
+    print("Threads:", threads_collection.count_documents({}))
+    print("Comments:", comments_collection.count_documents({}))
 
     mongo.close()
-    print("✅ Import fertig!")
 
 
 if __name__ == "__main__":

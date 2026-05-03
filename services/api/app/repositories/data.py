@@ -1,3 +1,4 @@
+from collections import defaultdict
 from app.db.mongo import MongoDB
 
 mongo = MongoDB()
@@ -7,24 +8,13 @@ comments_collection = mongo.collection("comments")
 
 
 def get_all_threads():
-    return list(threads_collection.find())
+    return list(threads_collection.find({}, {"_id": 0}))
 
 
-def get_thread_by_id(thread_id: str):
-    return threads_collection.find_one({"thread_id": thread_id})
+def get_all_comments_grouped_by_thread():
+    grouped = defaultdict(list)
 
+    for comment in comments_collection.find({}, {"_id": 0}):
+        grouped[comment["thread_id"]].append(comment)
 
-def get_comments_by_thread(thread_id: str):
-    return list(comments_collection.find({"thread_id": thread_id}))
-
-
-def insert_thread(thread: dict):
-    return threads_collection.insert_one(thread)
-
-
-def insert_comment(comment: dict):
-    return comments_collection.insert_one(comment)
-
-
-def get_all_comments():
-    return list(comments_collection.find())
+    return grouped
