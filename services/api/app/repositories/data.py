@@ -1,9 +1,9 @@
-from app.db.mongo import get_db
+from app.db.mongo import MongoDB
 
-db = get_db()
+mongo = MongoDB()
 
-threads_collection = db["threads"]
-comments_collection = db["comments"]
+threads_collection = mongo.collection("threads")
+comments_collection = mongo.collection("comments")
 
 
 def get_all_threads():
