@@ -130,3 +130,5 @@ uvicorn app.main:app --app-dir . --host 0.0.0.0 --port 8000 --reload
 ---
 
 You're now ready to develop and run the API locally 🚀
+
+
