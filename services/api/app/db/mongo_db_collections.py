@@ -7,8 +7,8 @@ def init_database():
     db.collection("threads").create_index("external_id")
     db.collection("threads").create_index("source")
 
-    db.collection("messages").create_index("thread_id")
-    db.collection("messages").create_index("created_at")
+    db.collection("comments").create_index("thread_id")
+    db.collection("comments").create_index("created_at")
 
     db.collection("analysis_results").create_index("thread_id")
     db.collection("analysis_results").create_index("risk_score")

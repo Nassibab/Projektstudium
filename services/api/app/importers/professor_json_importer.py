@@ -6,7 +6,7 @@ def import_json():
     mongo = MongoDB()
 
     threads_collection = mongo.collection("threads")
-    messages_collection = mongo.collection("messages")
+    comments_collection = mongo.collection("comments")
 
     file_path = "/app/app/data/synthetic_shitstorm_dataset.json"
 
@@ -26,7 +26,7 @@ def import_json():
 
         threads_collection.insert_one(thread_doc)
 
-        for msg in thread["messages"]:
+        for msg in thread["comments"]:
             msg_doc = {
                 "thread_id": thread["thread_id"],
                 "message_id": msg["id"],
@@ -41,7 +41,7 @@ def import_json():
                 "target_login": msg.get("target_login")
             }
 
-            messages_collection.insert_one(msg_doc)
+            comments_collection.insert_one(msg_doc)
 
     mongo.close()
     print("✅ Import fertig!")
