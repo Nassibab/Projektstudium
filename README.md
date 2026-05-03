@@ -366,14 +366,6 @@ docker-compose logs api --tail=100
 
 ---
 
-## 7. Zusammenfassung
-
-* MongoDB speichert Rohdaten
-* Neo4j modelliert Beziehungen
-* Synchronisation erfolgt über REST API
-* Visualisierung über Neo4j Browser möglich
-
----
 
 
 
