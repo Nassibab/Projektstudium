@@ -238,12 +238,6 @@ Password: password
 ---
 # 4.2 Datenmodell
 
-## 🧠 Überblick
-
-In der Graphdatenbank (Neo4j) wird ein Netzwerkmodell verwendet, um Diskussionen, Nutzerinteraktionen und Datenquellen strukturiert abzubilden.
-
----
-
 ## 🟢 Knoten (Nodes)
 
 Folgende Knotentypen werden verwendet:
@@ -270,7 +264,7 @@ Folgende Knotentypen werden verwendet:
 (:Comment)-[:IN_THREAD]->(:Thread)
 (:Comment)-[:REPLY_TO]->(:Comment)
 (:User)-[:REPLIED_TO_USER]->(:User)
-
+```
 ---
 
 ### 4.3 Beispielabfragen
