@@ -271,6 +271,8 @@ Folgende Knotentypen werden verwendet:
 (:Comment)-[:REPLY_TO]->(:Comment)
 (:User)-[:REPLIED_TO_USER]->(:User)
 
+---
+
 ### 4.3 Beispielabfragen
 
 Alle Knoten:
