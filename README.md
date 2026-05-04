@@ -236,23 +236,40 @@ Password: password
 ```
 
 ---
+# 4.2 Datenmodell
 
-### 4.2 Datenmodell
+## 🧠 Überblick
 
-In Neo4j werden folgende Knoten (Nodes) verwendet:
-
-* `User`
-* `Comment`
-* `Thread`
-
-Beziehungen (Relationships):
-
-* `(:User)-[:WROTE]->(:Comment)`
-* `(:Comment)-[:IN_THREAD]->(:Thread)`
-* `(:Comment)-[:REPLY_TO]->(:Comment)`
-* `(:User)-[:REPLIED_TO_USER]->(:User)`
+In der Graphdatenbank (Neo4j) wird ein Netzwerkmodell verwendet, um Diskussionen, Nutzerinteraktionen und Datenquellen strukturiert abzubilden.
 
 ---
+
+## 🟢 Knoten (Nodes)
+
+Folgende Knotentypen werden verwendet:
+
+- **User**  
+  Repräsentiert einen Nutzer (z. B. Social Media Account)
+
+- **Comment**  
+  Einzelne Beiträge oder Kommentare innerhalb eines Threads
+
+- **Thread**  
+  Diskussionsstrang (z. B. Post + Kommentare)
+
+- **Dataset**  
+  Quelle der Daten (z. B. JSON-Datei oder externe Plattform wie Bluesky, Instagram)
+
+---
+
+## 🔗 Beziehungen (Relationships)
+
+```text
+(:Dataset)-[:CONTAINS_THREAD]->(:Thread)
+(:User)-[:WROTE]->(:Comment)
+(:Comment)-[:IN_THREAD]->(:Thread)
+(:Comment)-[:REPLY_TO]->(:Comment)
+(:User)-[:REPLIED_TO_USER]->(:User)
 
 ### 4.3 Beispielabfragen
 
