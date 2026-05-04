@@ -14,8 +14,12 @@ def sync_all_threads_to_graph():
     comments_by_thread = get_all_comments_grouped_by_thread()
 
     for thread in threads:
+        source_file = thread.get("source_file", "unknown_source")
         thread_id = thread["thread_id"]
-        comments = comments_by_thread.get(thread_id, [])
+
+        # Wichtig: Kommentare nach Dataset + Thread holen
+        key = (source_file, thread_id)
+        comments = comments_by_thread.get(key, [])
 
         save_thread_with_comments(thread, comments)
 
@@ -24,11 +28,8 @@ def sync_all_threads_to_graph():
 
         for comment in comments:
             comment_id = comment.get("_id")
-
-            if not comment_id:
-                continue
-
-            unique_comment_ids.add(str(comment_id))
+            if comment_id:
+                unique_comment_ids.add(str(comment_id))
 
     return {
         "status": "success",
