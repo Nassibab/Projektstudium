@@ -339,18 +339,6 @@ curl -X POST http://localhost:8000/sync/graph
 
 ---
 
-### 5.3 Funktionsweise
-
-1. Threads werden aus MongoDB geladen
-2. Zugehörige Kommentare werden extrahiert
-3. Daten werden in Neo4j übertragen:
-
-   * Thread → Node
-   * Comment → Node
-   * User → Node
-   * Beziehungen werden erstellt
-
----
 
 ## 6. Reset & Debugging
 
