@@ -1,7 +1,14 @@
 from app.db.neo4j import get_driver
 
 
-def save_thread(tx, thread: dict):
+def save_thread_with_comments(thread: dict, comments: list[dict]):
+    driver = get_driver()
+
+    with driver.session() as session:
+        session.execute_write(_save_thread_with_comments_batch, thread, comments)
+
+
+def _save_thread_with_comments_batch(tx, thread: dict, comments: list[dict]):
     tx.run(
         """
         MERGE (t:Thread {id: $thread_id})
@@ -17,78 +24,55 @@ def save_thread(tx, thread: dict):
         description=thread.get("description"),
     )
 
-
-def save_comment(tx, msg: dict):
     tx.run(
         """
-        MERGE (u:User {login: $login})
+        UNWIND $comments AS msg
+        WITH msg
+        WHERE msg._id IS NOT NULL
 
-        MERGE (c:Comment {id: $message_id})
-        SET c.text = $text,
-            c.subject = $subject,
-            c.created = $created,
-            c.toxicity_level = $toxicity_level,
-            c.synthetic = $synthetic,
-            c.synthetic_role = $synthetic_role
+        MERGE (u:User {login: coalesce(msg.login, "unknown")})
+
+        MERGE (c:Comment {id: toString(msg._id)})
+        SET c.message_id = msg.message_id,
+            c.text = msg.text,
+            c.subject = msg.subject,
+            c.created = msg.created,
+            c.toxicity_level = msg.toxicity_level,
+            c.synthetic = msg.synthetic,
+            c.synthetic_role = msg.synthetic_role
 
         MERGE (t:Thread {id: $thread_id})
 
         MERGE (u)-[:WROTE]->(c)
         MERGE (c)-[:IN_THREAD]->(t)
         """,
-        login=msg["login"],
-        message_id=msg["message_id"],
-        thread_id=msg["thread_id"],
-        text=msg.get("text"),
-        subject=msg.get("subject"),
-        created=msg.get("created"),
-        toxicity_level=msg.get("toxicity_level"),
-        synthetic=msg.get("synthetic"),
-        synthetic_role=msg.get("synthetic_role"),
+        thread_id=thread["thread_id"],
+        comments=comments,
     )
-
-
-def save_reply_relation(tx, msg: dict):
-    parent = msg.get("parent")
-
-    if parent is None:
-        return
 
     tx.run(
         """
-        MATCH (c:Comment {id: $message_id})
-        MERGE (parent:Comment {id: $parent_id})
+        UNWIND $comments AS msg
+        WITH msg
+        WHERE msg._id IS NOT NULL
+          AND msg.parent IS NOT NULL
+
+        MATCH (c:Comment {id: toString(msg._id)})
+        MATCH (parent:Comment {message_id: msg.parent})
         MERGE (c)-[:REPLY_TO]->(parent)
         """,
-        message_id=msg["message_id"],
-        parent_id=parent,
+        comments=comments,
     )
-
-
-def save_target_user_relation(tx, msg: dict):
-    target_login = msg.get("target_login")
-
-    if not target_login:
-        return
 
     tx.run(
         """
-        MERGE (u:User {login: $login})
-        MERGE (target:User {login: $target_login})
+        UNWIND $comments AS msg
+        WITH msg
+        WHERE msg.target_login IS NOT NULL
+
+        MERGE (u:User {login: coalesce(msg.login, "unknown")})
+        MERGE (target:User {login: msg.target_login})
         MERGE (u)-[:REPLIED_TO_USER]->(target)
         """,
-        login=msg["login"],
-        target_login=target_login,
+        comments=comments,
     )
-
-
-def save_thread_with_comments(thread: dict, comments: list[dict]):
-    driver = get_driver()
-
-    with driver.session() as session:
-        session.execute_write(save_thread, thread)
-
-        for msg in comments:
-            session.execute_write(save_comment, msg)
-            session.execute_write(save_reply_relation, msg)
-            session.execute_write(save_target_user_relation, msg)

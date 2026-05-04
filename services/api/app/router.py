@@ -4,6 +4,8 @@ from .data import create_task, get_task, get_websites
 
 from app.services.mongodb_graph_sync import sync_all_threads_to_graph
 
+from app.services.report_service import get_thread_report
+
 router = APIRouter()
 
 
@@ -29,3 +31,7 @@ def get_websites_endpoint():
 @router.post("/sync/graph")
 def sync_graph():
     return sync_all_threads_to_graph()
+
+@router.get("/report/threads")
+def report_threads():
+    return get_thread_report()

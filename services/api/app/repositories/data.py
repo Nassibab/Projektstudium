@@ -14,7 +14,8 @@ def get_all_threads():
 def get_all_comments_grouped_by_thread():
     grouped = defaultdict(list)
 
-    for comment in comments_collection.find({}, {"_id": 0}):
+    for comment in comments_collection.find({}):
+        comment["_id"] = str(comment["_id"])
         grouped[comment["thread_id"]].append(comment)
 
     return grouped
