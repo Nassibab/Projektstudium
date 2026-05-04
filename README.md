@@ -236,9 +236,9 @@ Password: password
 ```
 
 ---
-# 4.2 Datenmodell
+### 4.2 Datenmodell
 
-## 🟢 Knoten (Nodes)
+### 🟢 Knoten (Nodes)
 
 Folgende Knotentypen werden verwendet:
 
