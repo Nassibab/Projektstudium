@@ -12,3 +12,10 @@ services:
     ports:
       - "3000:3000"
     restart: unless-stopped
+
+  ingestion:
+    build: ./services/ingestion
+    container_name: groupproject_ingestion
+    ports:
+      - "8001:8001"
+    restart: unless-stopped
