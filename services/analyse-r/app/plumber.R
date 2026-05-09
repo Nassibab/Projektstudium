@@ -2,9 +2,9 @@ library(plumber)
 library(jsonlite)
 
 
-#* @get /test
+#* @get /
 function() {
-  list(message = "Hallo R-Analyse!")
+  list(message = "R-Analyse is running")
 }
 
 #* Vorhersage / Klassifikation

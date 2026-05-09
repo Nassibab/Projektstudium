@@ -1,8 +1,6 @@
 from fastapi import FastAPI
+from .router import router
 
-app = FastAPI()
+app = FastAPI(title="Analyse-py Service")
 
-
-@app.get("/test")
-async def test():
-    return {"status": "ok", "service": "analyse"}
+app.include_router(router)

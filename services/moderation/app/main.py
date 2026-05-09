@@ -1,8 +1,6 @@
 from fastapi import FastAPI
+from .router import router
 
-app = FastAPI()
+app = FastAPI(title="Moderation Service")
 
-
-@app.get("/test")
-async def test():
-    return {"status": "ok", "service": "moderation"}
+app.include_router(router)
