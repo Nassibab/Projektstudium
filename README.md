@@ -1,6 +1,6 @@
 # Group Project Template (API + Vue Frontend)
 
-## 🚀 Markdown Preview Shortcuts
+## Markdown Preview Shortcuts
 
 | Platform          | Split Preview | New Tab        |
 | ----------------- | ------------- | -------------- |
@@ -29,7 +29,7 @@
 
 ---
 
-## 🎯 Quick Start (Docker)
+## Quick Start (Docker)
 
 ### Unix-like systems (Linux/macOS)
 
@@ -54,20 +54,23 @@ This builds all services, including the Vue frontend via npm.
 
 ---
 
-## � Stopping and Managing Services
+## Stopping and Managing Services
 
 Once running, use these commands to manage your containers (works on all platforms):
-
+- **Creates/updates and starts all containers (or only specific ones if specified)**: `docker compose up <service-name>`
+- **start a single container (standalone, not via Compose)**: `docker run`
 - **Stop services**: `docker compose down`
 - **View logs**: `docker compose logs -f` (follow logs in real-time)
+- **xxx**: docker compose up --build
 - **Restart services**: `docker compose restart`
 - **Rebuild without cache**: `docker compose build --no-cache`
 - **Check status**: `docker compose ps`
-- **Clean up unused images/containers**: `docker system prune -a` (removes old builds, use carefully)
+- **Clean up unused images/containers**: `docker system prune -a` (removes old builds)
+
 
 ---
 
-## �🔧 Local API Development (Fixes Uvicorn Error)
+## Local API Development (Fixes Uvicorn Error)
 
 The error occurs because:
 
@@ -79,7 +82,7 @@ cannot find the module when executed inside `services/api`, since Python’s imp
 
 ---
 
-### ✅ Option 1: Run from Project Root (Recommended)
+### Option 1: Run from Project Root (Recommended)
 
 ```bash
 cd services/api
@@ -101,7 +104,7 @@ uvicorn services.api.app.main:app --host 0.0.0.0 --port 8000 --reload
 
 ---
 
-### ✅ Option 2: Use `--app-dir` (Run inside services/api)
+### Option 2: Use `--app-dir` (Run inside services/api)
 
 ```bash
 cd services/api
@@ -121,7 +124,7 @@ uvicorn app.main:app --app-dir . --host 0.0.0.0 --port 8000 --reload
 
 ---
 
-## 🧠 VSCode Setup
+## VSCode Setup
 
 1. Open Command Palette: `Ctrl+Shift+P`
 2. Select: **Python: Select Interpreter**
