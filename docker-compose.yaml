@@ -26,7 +26,7 @@ services:
     restart: unless-stopped
 
   mongodb:
-    image: mongodb/mongodb-community-server:latest
+    image: mongo:4.4
     container_name: groupproject_mongodb
     ports:
       - "27017:27017"
