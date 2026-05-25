@@ -20,10 +20,10 @@ async def stream_bluesky(url: str):
 
 
 @router.get("/threads")
-async def list_threads():
+async def list_threads_from_MongoDB():
     return await get_threads()
 
 
 @router.get("/threads/{thread_id}/comments")
-async def list_comments(thread_id: str):
+async def list_comments_from_MongoDB(thread_id: str):
     return await get_comments_by_thread(thread_id)

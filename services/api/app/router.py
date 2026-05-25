@@ -32,7 +32,7 @@ def get_websites_endpoint():
     return get_websites()
 
 @router.post("/import/professor")
-def import_professor():
+def import_professor_data_into_MongoDB():
     import_json()
 
     return {
@@ -41,9 +41,9 @@ def import_professor():
     }
 
 @router.post("/sync/graph")
-def sync_graph():
+def sync_MongoDB_NEO4J():
     return sync_all_threads_to_graph()
 
 @router.get("/report/threads")
-def report_threads():
+def report_threads_in_MongoDB_and_NEO4J():
     return get_thread_report()
