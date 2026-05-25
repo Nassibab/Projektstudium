@@ -32,15 +32,21 @@ def import_json():
 
             all_threads.append({
                 "thread_id": thread_id,
+                "external_id": thread_id,
+                "source_provider": "professor",
+                "source_platform": "professor_dataset",
+                "source_type": "training",
                 "title": thread.get("title"),
                 "scenario_type": thread.get("scenario_type"),
                 "label_shitstorm": thread.get("label_shitstorm"),
                 "description": thread.get("description"),
                 "source_file": filename,
+                "status": "raw",
             })
 
             for msg in thread.get("messages", []):
                 all_comments.append({
+                    "comment_id": msg.get("id"),
                     "message_id": msg.get("id"),
                     "thread_id": thread_id,
                     "parent": msg.get("parent"),
@@ -52,7 +58,11 @@ def import_json():
                     "synthetic_role": msg.get("synthetic_role"),
                     "toxicity_level": msg.get("toxicity_level"),
                     "target_login": msg.get("target_login"),
+                    "source_provider": "professor",
+                    "source_platform": "professor_dataset",
+                    "source_type": "training",
                     "source_file": filename,
+                    "status": "raw",
                 })
 
     if all_threads:

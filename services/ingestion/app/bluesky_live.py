@@ -21,6 +21,7 @@ import websockets
 from atproto import IdResolver
 from atproto_client.models.string_formats import Handle
 from pydantic import BaseModel
+from .repositories.bluesky_repository import save_post, save_comment
 
 # ---------------------------------------------------------------------------
 # Pydantic models
@@ -191,7 +192,7 @@ async def comment_consumer():
             print("\n--- New Live Comment (ready for DB) ---")
             print(comment.model_dump_json(indent=2))
             print(f"  Post now has {len(current_post.comments)} comments total")
-            # 👉 Replace with: save_to_db(comment) or save_to_db(current_post)
+            await save_comment(comment, current_post.id)
 
         queue.task_done()
 
@@ -296,7 +297,7 @@ async def run_stream(url: str):
 
         print("\n--- Post snapshot (ready for DB) ---")
         print(current_post.model_dump_json(indent=2))
-        # 👉 Replace with: save_to_db(current_post)
+        await save_post(current_post)
 
         # 4. Start live stream for new comments
         print("\n  Starting live stream...\n")
