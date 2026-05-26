@@ -15,6 +15,7 @@ import json
 import re
 from enum import Enum
 from typing import List, Optional
+from datetime import datetime, timezone
 
 import httpx
 import websockets
@@ -32,6 +33,7 @@ class Comment(BaseModel):
     text: str
     author: str
     parent_id: Optional[str] = None
+    created_at: Optional[str] = None
 
 
 class Post(BaseModel):
@@ -39,6 +41,7 @@ class Post(BaseModel):
     platform: str
     text: str
     comments: List[Comment] = []
+    
 
 #______________
 #Input Variable
@@ -138,11 +141,21 @@ async def fetch_existing_comments(handle: str, post_id: str) -> List[Comment]:
             if text:
                 parent_uri = record.get("reply", {}).get("parent", {}).get("uri", "")
                 parent_id = parent_uri.split("/")[-1] if parent_uri else None
+                created_raw = record.get("createdAt")
+
+                created_at = None
+
+                if created_raw:
+                    created_at = datetime.fromisoformat(
+                        created_raw.replace("Z", "+00:00")
+                    ).strftime("%Y-%m-%d %H:%M:%S")
+
                 comments.append(Comment(
                     id=post["uri"].split("/")[-1],
                     text=text,
                     author=post["author"]["did"],
                     parent_id=parent_id,
+                    created_at=created_at,
                 ))
             if reply.get("replies"):
                 parse_replies(reply["replies"])
@@ -225,11 +238,21 @@ async def _stream_comments(ws_url: str, post_id: str | None = None):     # ← n
                     if post_id and not is_reply_to_post(record, post_id):  # ← post filter only when needed
                         continue
 
+                    created_raw = record.get("createdAt")
+
+                    created_at = None
+
+                    if created_raw:
+                        created_at = datetime.fromisoformat(
+                            created_raw.replace("Z", "+00:00")
+                        ).strftime("%Y-%m-%d %H:%M:%S")
+
                     comment = Comment(
                         id=commit.get("rkey", ""),
                         text=text,
                         author=event.get("did", "unknown"),
                         parent_id=extract_reply_parent(record),
+                        created_at=created_at,
                     )
                     await queue.put(comment)
 
@@ -316,9 +339,3 @@ async def run_stream(url: str):
             comment_consumer(),
         )
 
-    
-if __name__ == "__main__":
-    try:
-        asyncio.run(run_stream(url))
-    except KeyboardInterrupt:
-        print("\nStopped.")

@@ -2,6 +2,8 @@ import os
 import json
 from pathlib import Path
 from app.db.mongo import MongoDB
+from app.mappers.comment_mapper import map_comment
+from app.mappers.thread_mapper import map_thread
 
 
 def import_json():
@@ -30,41 +32,42 @@ def import_json():
         for thread in data.get("threads", []):
             thread_id = thread["thread_id"]
 
-            all_threads.append({
-                "thread_id": thread_id,
-                "external_id": thread_id,
-                "source_provider": "professor",
-                "source_platform": "professor_dataset",
-                "source_type": "training",
-                "title": thread.get("title"),
-                "scenario_type": thread.get("scenario_type"),
-                "label_shitstorm": thread.get("label_shitstorm"),
-                "description": thread.get("description"),
-                "source_file": filename,
-                "status": "raw",
-            })
+            all_threads.append(
+                map_thread(
+                    thread_id=thread_id,
+                    title=thread.get("title"),
+                    comments_count=len(thread.get("messages", [])),
+                    source_platform="professor_dataset",
+                    source_type="training/test",
+                    extra={
+                        "scenario_type": thread.get("scenario_type"),
+                        "label_shitstorm": thread.get("label_shitstorm"),
+                        "description": thread.get("description"),
+                        "source_file": filename,
+                    },
+                )
+            )
 
             for msg in thread.get("messages", []):
-                all_comments.append({
-                    "comment_id": msg.get("id"),
-                    "message_id": msg.get("id"),
-                    "thread_id": thread_id,
-                    "parent": msg.get("parent"),
-                    "login": msg.get("login"),
-                    "subject": msg.get("subject"),
-                    "text": msg.get("text"),
-                    "created": msg.get("created"),
-                    "synthetic": msg.get("synthetic"),
-                    "synthetic_role": msg.get("synthetic_role"),
-                    "toxicity_level": msg.get("toxicity_level"),
-                    "target_login": msg.get("target_login"),
-                    "source_provider": "professor",
-                    "source_platform": "professor_dataset",
-                    "source_type": "training",
-                    "source_file": filename,
-                    "status": "raw",
-                })
-
+                all_comments.append(
+                    map_comment(
+                        comment_id=msg.get("id"),
+                        thread_id=thread_id,
+                        user=msg.get("login"),
+                        text=msg.get("text"),
+                        parent_id=msg.get("parent"),
+                        created_at=msg.get("created"),
+                        source_platform="professor_dataset",
+                        source_type="training/test",
+                        extra={
+                            "subject": msg.get("subject"),
+                            "synthetic": msg.get("synthetic"),
+                            "synthetic_role": msg.get("synthetic_role"),
+                            "toxicity_level": msg.get("toxicity_level"),
+                            "target_user": msg.get("target_login"),
+                        },
+                    )
+                )
     if all_threads:
         threads_collection.insert_many(all_threads)
 

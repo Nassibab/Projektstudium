@@ -1,4 +1,5 @@
 from fastapi import APIRouter
+import asyncio
 
 from .services.ingestion_service import start_bluesky_stream
 from .repositories.bluesky_repository import (
@@ -16,7 +17,12 @@ def read_root():
 
 @router.get("/stream")
 async def stream_bluesky(url: str):
-    return await start_bluesky_stream(url)
+    asyncio.create_task(start_bluesky_stream(url))
+
+    return {
+        "status": "stream started",
+        "url": url,
+    }
 
 
 @router.get("/threads")
