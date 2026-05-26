@@ -3,8 +3,8 @@ import os
 
 client = OpenAI(
     
-    base_url="https://hub.nhr.fau.de/api/llmgw/v1",
-    api_key="API-KEY-FROM-PROF-EMAIL"
+    base_url="URL_in_Whatsapp",
+    api_key="API-KEY-in_Whatsapp"
 )
 
 response = client.chat.completions.create(
