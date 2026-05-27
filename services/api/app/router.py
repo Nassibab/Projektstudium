@@ -8,6 +8,11 @@ from app.services.report_service import get_thread_report
 
 from app.importers.professor_json_importer import import_json
 
+from app.services.mongodb_graph_sync import (
+    sync_all_threads_to_graph,
+    reset_mongo_sync_status_if_missing_in_neo4j,
+)
+
 
 router = APIRouter()
 
@@ -47,3 +52,7 @@ def sync_MongoDB_NEO4J():
 @router.get("/report/threads")
 def report_threads_in_MongoDB_and_NEO4J():
     return get_thread_report()
+
+@router.post("/sync/reset-missing-neo4j")
+def reset_missing_neo4j_sync_status():
+    return reset_mongo_sync_status_if_missing_in_neo4j()
