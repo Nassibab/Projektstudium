@@ -6,6 +6,9 @@ from app.services.mongodb_graph_sync import sync_all_threads_to_graph
 
 from app.services.report_service import get_thread_report
 
+from app.importers.professor_json_importer import import_json
+
+
 router = APIRouter()
 
 
@@ -28,10 +31,19 @@ def get_task_endpoint(task_id: int):
 def get_websites_endpoint():
     return get_websites()
 
+@router.post("/import/professor")
+def import_professor_data_into_MongoDB():
+    import_json()
+
+    return {
+        "status": "success",
+        "message": "Professor data imported"
+    }
+
 @router.post("/sync/graph")
-def sync_graph():
+def sync_MongoDB_NEO4J():
     return sync_all_threads_to_graph()
 
 @router.get("/report/threads")
-def report_threads():
+def report_threads_in_MongoDB_and_NEO4J():
     return get_thread_report()
