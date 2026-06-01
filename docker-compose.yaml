@@ -88,6 +88,8 @@ services:
     container_name: groupproject_analyse-r
     ports:
       - "8020:8000"
+    depends_on:
+    - api
     environment:
       API_URL: http://api:8000
       MODERATION_URL: http://moderation:8000
