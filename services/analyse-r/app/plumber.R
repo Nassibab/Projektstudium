@@ -1,5 +1,17 @@
 library(plumber)
 library(jsonlite)
+library(dplyr)
+library(mlr3)
+library(mlr3learners)
+library(ranger)
+
+source("analysis_configuration.R")
+source("analysis_data_loader.R")
+source("professor_dataset_preprocessing.R")
+source("bluesky_data_preprocessing.R")
+source("shitstorm_model_training.R")
+source("bluesky_scenario_prediction.R")
+source("prediction_results_table.R")
 
 #* Health Check
 #* @get /health
@@ -10,7 +22,7 @@ function() {
 #* Test: Daten aus API holen
 #* @get /test-data
 function() {
-  data <- jsonlite::fromJSON("http://api:8000/analysis/comments")
+  data <- load_analysis_data()
 
   list(
     status = "success",
@@ -23,7 +35,7 @@ function() {
 #* Einfache Analyse
 #* @get /analyse-summary
 function() {
-  data <- jsonlite::fromJSON("http://api:8000/analysis/comments")
+  data <- load_analysis_data()
 
   list(
     status = "success",
@@ -36,12 +48,7 @@ function() {
 #* ML-Daten vorbereiten
 #* @get /prepare-ml-data
 function() {
-  data <- jsonlite::fromJSON(
-    "http://api:8000/analysis/comments",
-    flatten = TRUE
-  )
-
-  data <- as.data.frame(data)
+  data <- load_analysis_data()
 
   professor_data <- data[data[["source_platform"]] == "professor_dataset", ]
   bluesky_data <- data[data[["source_platform"]] == "bluesky", ]
@@ -60,19 +67,13 @@ function() {
 #* Professor-Daten 80/20 aufteilen
 #* @get /split-professor-data
 function() {
-  data <- jsonlite::fromJSON(
-    "http://api:8000/analysis/comments",
-    flatten = TRUE
-  )
-
-  data <- as.data.frame(data)
-
+  data <- load_analysis_data()
   professor_data <- data[data[["source_platform"]] == "professor_dataset", ]
 
-  set.seed(123)
+  set.seed(RANDOM_SEED)
 
   n <- nrow(professor_data)
-  train_indices <- sample(seq_len(n), size = floor(0.8 * n))
+  train_indices <- sample(seq_len(n), size = floor(TRAIN_RATIO * n))
 
   train_data <- professor_data[train_indices, ]
   test_data <- professor_data[-train_indices, ]
@@ -85,4 +86,41 @@ function() {
     train_preview = head(train_data, 3),
     test_preview = head(test_data, 3)
   )
+}
+
+#* Modelltraining mit rpart
+#* @get /train-model
+function() {
+  train_rpart_model()
+}
+
+#* Random Forest Training mit Ranger
+#* @get /train-ranger
+function() {
+  train_ranger_model()
+}
+
+#* Bluesky-Daten als JSON vorhersagen
+#* @get /predict-bluesky
+function() {
+  result <- predict_bluesky_scenarios()
+
+  list(
+    status = "success",
+    model = "classif.ranger",
+    predicted_rows = nrow(result),
+    predictions = result
+  )
+}
+
+#* Bluesky-Daten als HTML-Tabelle anzeigen
+#* @get /predict-bluesky-table
+#* @html
+function(res) {
+  result <- predict_bluesky_scenarios()
+  html <- create_prediction_html_table(result)
+
+  res$setHeader("Content-Type", "text/html; charset=utf-8")
+
+  html
 }

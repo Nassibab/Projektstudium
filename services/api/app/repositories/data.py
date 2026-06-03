@@ -46,10 +46,18 @@ def get_all_comments_grouped_by_thread():
 
 def get_comments_for_analysis():
     comments = list(comments_collection.find({}, {"_id": 0}))
+    threads = list(threads_collection.find({}, {"_id": 0}))
+
+    threads_by_id = {
+        t["thread_id"]: t
+        for t in threads
+    }
 
     result = []
 
     for c in comments:
+        thread = threads_by_id.get(c.get("thread_id"), {})
+
         result.append({
             "id": c.get("comment_numeric_id"),
             "comment_id": c.get("comment_id"),
@@ -58,14 +66,19 @@ def get_comments_for_analysis():
             "login": c.get("user"),
             "text": c.get("text"),
             "created": c.get("created_at"),
+
             "source_platform": c.get("source_platform"),
             "source_type": c.get("source_type"),
 
-            # Professor Felder
             "synthetic": c.get("synthetic"),
             "synthetic_role": c.get("synthetic_role"),
             "toxicity_level": c.get("toxicity_level"),
             "target_login": c.get("target_user"),
+
+            "thread_title": thread.get("title"),
+            "comments_count": thread.get("comments_count"),
+            "scenario_type": thread.get("scenario_type"),
+            "label_shitstorm": thread.get("label_shitstorm"),
         })
 
     return result
