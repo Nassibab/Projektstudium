@@ -58,7 +58,6 @@ async def save_comment(comment, thread_id: str):
     await comments_collection.update_one(
         {
             "comment_id": comment.id,
-            "thread_id": thread_id,
             "source_platform": "bluesky",
         },
         {

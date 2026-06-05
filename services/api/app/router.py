@@ -4,6 +4,7 @@ from fastapi import APIRouter
 from app.services.mongodb_graph_sync import sync_all_threads_to_graph
 from app.services.report_service import get_thread_report
 from app.importers.professor_json_importer import import_json
+from app.repositories.data import get_comments_for_analysis
 
 from app.services.mongodb_graph_sync import (
     sync_all_threads_to_graph,
@@ -100,3 +101,7 @@ def report_threads_in_MongoDB_and_NEO4J():
 @router.post("/sync/reset-missing-neo4j")
 def reset_missing_neo4j_sync_status():
     return reset_mongo_sync_status_if_missing_in_neo4j()
+
+@router.get("/analysis/comments")
+def get_analysis_comments():
+    return get_comments_for_analysis()

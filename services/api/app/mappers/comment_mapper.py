@@ -1,3 +1,9 @@
+import hashlib
+
+def make_numeric_id(value: str) -> int:
+    return int(hashlib.sha256(value.encode()).hexdigest(), 16) % 10**12
+
+
 def map_comment(
     *,
     comment_id,
@@ -12,8 +18,9 @@ def map_comment(
 ):
     data = {
         "comment_id": comment_id,
+        "comment_numeric_id": make_numeric_id(str(comment_id)),
+        
         "thread_id": thread_id,
-
         "parent_id": parent_id,
 
         "user": user,
