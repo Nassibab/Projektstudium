@@ -4,6 +4,7 @@ library(dplyr)
 library(mlr3)
 library(mlr3learners)
 library(ranger)
+library(httr)
 
 source("analysis_configuration.R")
 source("analysis_data_loader.R")
@@ -123,4 +124,30 @@ function(res) {
   res$setHeader("Content-Type", "text/html; charset=utf-8")
 
   html
+}
+
+#Test
+#* Kommentar an Moderation senden
+#* @post /send-to-moderation
+function() {
+  #test comment
+  comment <- list(
+    comment_id = "test-1",
+    text = "Das ist ein Test-Kommentar aus analyse-r",
+    source = "analyse-r"
+  )
+
+  #POST-Request mit test comment
+  response <- httr::POST(
+    url = paste0(Sys.getenv("MODERATION_URL", "http://moderation:8000"), "/moderate"),
+    body = comment,
+    encode = "json"
+  )
+
+  #Status nach Absenden an Moderation
+  list(
+    status = "sent",
+    moderation_status = httr::status_code(response),
+    moderation_response = httr::content(response, as = "parsed")
+  )
 }
