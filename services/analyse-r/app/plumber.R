@@ -124,3 +124,19 @@ function(res) {
 
   html
 }
+
+
+
+
+
+source("LLM_Service.R")
+
+#* Test LLM
+#* @get /test-llm
+function() {
+  answer <- call_llm("Sag Hallo.")
+
+  list(
+    answer = answer
+  )
+}
