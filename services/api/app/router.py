@@ -1,10 +1,12 @@
 import random
 from fastapi import APIRouter
+from fastapi.responses import StreamingResponse
 
 from app.services.mongodb_graph_sync import sync_all_threads_to_graph
 from app.services.report_service import get_thread_report
 from app.importers.professor_json_importer import import_json
 from app.repositories.data import get_comments_for_analysis
+from app.services.redis_events import iter_thread_updates, publish_thread_update
 
 from app.services.mongodb_graph_sync import (
     sync_all_threads_to_graph,
@@ -44,10 +46,48 @@ def get_analysis_comments():
     return get_comments_for_analysis()
 
 
+@router.get("/demo/stream")
+def stream_demo_updates():
+    return StreamingResponse(iter_thread_updates(), media_type="text/event-stream")
+
+
+@router.post("/demo/publish")
+def publish_demo_update():
+    payload = {
+        "type": "comment_added",
+        "threadId": 1,
+        "comment": {
+            "id": 999,
+            "author": "Redis Demo",
+            "time": "2026-06-10T12:00:00Z",
+            "text": "Dieser Kommentar wurde über Redis an die offene Dashboard-Sitzung gesendet.",
+            "moderation": "Demo-Event aus dem Redis-SSE-Pfad.",
+            "kpis": [
+                {"name": "Toxizität", "value": 0.18},
+                {"name": "Respekt", "value": 0.22},
+                {"name": "Relevanz", "value": 0.30},
+                {"name": "Klarheit", "value": 0.25},
+                {"name": "Emotionalität", "value": 0.20},
+                {"name": "Sachlichkeit", "value": 0.28},
+            ],
+            "score": 0.24,
+        },
+    }
+
+    subscribers = publish_thread_update(payload)
+
+    return {
+        "status": "ok",
+        "subscribers": subscribers,
+        "event": payload,
+    }
+
+
 @router.get("/demo-data")
 def read_demo_data():
     return [{
         "thread": {
+            "id": 1,
             "title": "Diskussion zum neuen Mobilitätsbericht: Autofreie Innenstädte?",
             "text": (
                 "Die Stadtverwaltung hat gestern den neuen Bericht zur Verkehrsentwicklung veröffentlicht. Laut den neuesten Statistiken hat sich die Luftqualität in den Testzonen deutlich verbessert, während Teile des Einzelhandels über Umsatzrückgänge klagen. Was ist eure Meinung zu diesen Zahlen? Sollen wir den Weg der autofreien Innenstädte weitergehen oder schadet das der Wirtschaft zu sehr?"
@@ -106,6 +146,7 @@ def read_demo_data():
     },
     {
     "thread": {
+        "id": 2,
         "title": "Bürgerentscheid: Neues Wohngebiet am Stadtwald?",
         "text": "Der Stadtrat hat gestern die Pläne für das neue Wohngebiet am Rande des Stadtwalds vorgestellt. Einerseits fehlt uns in der Kommune dringend bezahlbarer Wohnraum, besonders für junge Familien. Andererseits müssten dafür knapp 5 Hektar intakte Waldfläche gerodet werden. Wie seht ihr das? Soll der Wald als Naherholungsgebiet bleiben, oder hat die Schaffung von neuem Wohnraum absolute Vorrang?",
         "comments": [
@@ -193,6 +234,7 @@ def read_demo_data():
     },
     {
         "thread": {
+        "id": 3,
         "title": "Ideen für das diesjährige Straßenfest im Viertel",
         "text": "Hallo Nachbarn! Nächsten Monat steht wieder unser jährliches Straßenfest an. Das Orga-Team hat schon ein paar Basis-Dinge geplant (Grillstation, Getränkestand, Kinderschminken). Habt ihr noch weitere Ideen oder Wünsche, was wir dieses Jahr anbieten könnten? Jeder Vorschlag ist willkommen, auch Helfer für den Aufbau werden noch gesucht!",
         "comments": [

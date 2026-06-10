@@ -3,10 +3,12 @@
     <div class="page">
       <header class="topbar">
         <h1>Moderations-Dashboard Demo</h1>
+        <button class="debug-btn" @click="triggerPublish" title="Call /demo/publish">
+          Debug Publish
+        </button>
       </header>
 
       <section v-if="currentComment" class="dashboard">
-        <!-- 1. SCORE PANEL -->
         <div class="panel score-panel">
           <div class="panel-header">
             <div>
@@ -24,7 +26,6 @@
             {{ commentDateTime }}
           </div>
 
-          <!-- LEGENDE -->
           <div class="score-legend">
             <h4>Legende / Score-Bereiche</h4>
             <ul>
@@ -52,7 +53,6 @@
           </div>
         </div>
 
-        <!-- 2. LINE CHART PANEL -->
         <div class="panel chart-panel">
           <div class="panel-header">
             <div>
@@ -93,7 +93,6 @@
           </svg>
         </div>
 
-        <!-- 3. RADAR PANEL -->
         <div class="panel radar-panel">
           <div class="panel-header">
             <div>
@@ -148,10 +147,8 @@
         </div>
       </section>
 
-      <!-- BOTTOM SECTION -->
       <section v-if="demoData" class="bottom-section">
         
-        <!-- LINKE SEITE: THREAD-TITEL LISTE -->
         <div class="panel thread-panel-left">
           <h3>Aktive Threads</h3>
           <div class="thread-list">
@@ -171,7 +168,6 @@
           </div>
         </div>
 
-        <!-- RECHTE SEITE: THREAD TEXT & KOMMENTARE -->
         <div class="panel thread-panel-right" v-if="currentThread">
           <h2>Originaler Beitrag</h2>
           <div class="thread-text-container">
@@ -222,6 +218,7 @@ export default {
       demoData: null,
       selectedThreadId: null,
       selectedCommentId: null,
+      eventSource: null,
     }
   },
   computed: {
@@ -314,18 +311,66 @@ export default {
     }
   },
   methods: {
+    async triggerPublish() {
+      try {
+        await fetch('http://localhost:8000/demo/publish', {
+          method: 'POST'
+        })
+        console.log('Publish endpoint triggered successfully')
+      } catch (error) {
+        console.error('Failed to trigger publish endpoint:', error)
+      }
+    },
+
     async fetchDemoData() {
       try {
         const response = await api.getDemoData()
         this.demoData = response.data
-        
-        // Initiale Auswahl setzen
+
         if (this.threadList.length > 0) {
-          this.selectedThreadId = this.threadList[0].id || null;
+          this.selectedThreadId = this.threadList[0].id || null
         }
       } catch (error) {
         console.error('API Error:', error)
       }
+    },
+    connectDemoStream() {
+      if (this.eventSource) return
+
+      this.eventSource = new EventSource('http://localhost:8000/demo/stream')
+
+      this.eventSource.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data)
+          this.applyThreadUpdate(payload)
+        } catch (error) {
+          console.error('SSE parse error:', error)
+        }
+      }
+
+      this.eventSource.onerror = () => {
+        console.warn('SSE connection lost, retrying...')
+      }
+    },
+    applyThreadUpdate(payload) {
+      if (!payload || !this.demoData || payload.type !== 'comment_added') return
+
+      if (!Array.isArray(this.demoData)) return
+
+      this.demoData = this.demoData.map((item) => {
+        if (!item.thread || item.thread.id !== payload.threadId) return item
+
+        return {
+          ...item,
+          thread: {
+            ...item.thread,
+            comments: [...(item.thread.comments || []), payload.comment],
+          },
+        }
+      })
+
+      this.selectedThreadId = payload.threadId
+      this.selectedCommentId = payload.comment?.id || null
     },
     selectThread(thread) {
       this.selectedThreadId = thread.id;
@@ -391,6 +436,13 @@ export default {
   },
   mounted() {
     this.fetchDemoData()
+    this.connectDemoStream()
+  },
+  beforeUnmount() {
+    if (this.eventSource) {
+      this.eventSource.close()
+      this.eventSource = null
+    }
   },
 }
 </script>
@@ -431,11 +483,35 @@ body, html {
   box-sizing: border-box;
 }
 
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
 .topbar h1 {
-  margin: 0 0 24px 0;
+  margin: 0;
   font-size: 1.8rem;
   font-weight: 700;
   color: var(--text);
+}
+
+.debug-btn {
+  background-color: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.debug-btn:hover {
+  background-color: var(--surface-card);
+  color: var(--text);
+  border-color: var(--muted);
 }
 
 .dashboard {

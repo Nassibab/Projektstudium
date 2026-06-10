@@ -9,6 +9,7 @@ services:
     depends_on:
       - mongodb
       - neo4j
+      - redis
     environment:
       MONGO_URI: mongodb://mongodb:27017
       MONGO_DB: shitstorm_db
@@ -23,6 +24,13 @@ services:
     container_name: groupproject_frontend
     ports:
       - "3000:3000"
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: groupproject_redis
+    ports:
+      - "6379:6379"
     restart: unless-stopped
 
   mongodb:
