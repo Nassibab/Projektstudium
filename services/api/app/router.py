@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import Any
+from fastapi.responses import StreamingResponse
 
 from app.services.mongodb_graph_sync import(
      sync_all_threads_to_graph,
@@ -21,6 +22,11 @@ from app.database_services.mongo_data_service import (
 )
 from app.importers.professor_llm_json_importer import import_professor_llm_dataset
 from app.services.redis_events import iter_thread_updates, publish_thread_update
+
+from app.services.mongodb_graph_sync import (
+    sync_all_threads_to_graph,
+    reset_mongo_sync_status_if_missing_in_neo4j,
+)
 
 
 router = APIRouter()
