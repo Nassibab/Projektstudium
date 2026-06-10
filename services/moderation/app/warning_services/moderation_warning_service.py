@@ -2,6 +2,9 @@ from app.warning_services.window_store import WindowStore
 from app.warning_services.window_aggregator import WindowAggregator
 from app.warning_services.shitstorm_scorer import ShitstormScorer
 from app.measure_services.countermeasure_service import CountermeasureService
+from app.measure_services.counter_speech_selector import CounterSpeechSelector
+
+
 
 class ModerationWarningService:
     def __init__(self, window_minutes=5, history_window_size=3):
@@ -11,7 +14,11 @@ class ModerationWarningService:
         self.aggregator = WindowAggregator(self.store)
         # berechnet Shitstorm-Score
         self.scorer = ShitstormScorer(history_window_size)
+
         self.countermeasures = CountermeasureService()
+
+        #Schaut NUR, ob Gegenrede benötigt wird
+        self.counter_speech_selector = CounterSpeechSelector()
 
     #Funktion wird jedes Mal aufgerufen, wenn ein neuer Kommentar reinkomm
     def process_comment(self, comment):
@@ -27,9 +34,28 @@ class ModerationWarningService:
             warning_level=score_result["warning_level"]
         )
 
+        # Gegenrede
+        should_generate_counter_speech = (
+            self.counter_speech_selector.should_generate_counter_speech(
+                comment=comment,
+                shitstorm_score=score_result["final_shitstorm_score"],
+                warning_level=score_result["warning_level"]
+            )
+        )
+
         return {
             "status": "success",
+            "comment_id": comment.get("id"),
+            "thread_id": thread_id,
             "current_window_metrics": metrics,
             "shitstorm_prediction": score_result,
-            "countermeasures": countermeasure_result
+            "countermeasures": countermeasure_result,
+            "counter_speech": {
+                "should_generate": should_generate_counter_speech,
+                "reason": (
+                    "Comment is suitable for counter speech."
+                    if should_generate_counter_speech
+                    else "Counter speech is not required for this comment."
+                )
+            }
         }
