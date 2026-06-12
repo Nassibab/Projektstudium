@@ -1,6 +1,4 @@
-#-----------------------------------
-# Daten aus der FastAPI laden
-#-----------------------------------
+library(jsonlite)
 
 load_analysis_data <- function() {
   data <- jsonlite::fromJSON(

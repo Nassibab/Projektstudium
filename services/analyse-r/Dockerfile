@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y \
     g++ \
     && rm -rf /var/lib/apt/lists/*
 
-RUN Rscript -e "install.packages(c('plumber','jsonlite','dplyr','ggplot2','rpart','httr'), repos='https://cloud.r-project.org')"
+RUN Rscript -e "install.packages(c('plumber','jsonlite','dplyr','ggplot2','rpart'), repos='https://cloud.r-project.org')"
 
 RUN Rscript -e "options(warn=2); install.packages('mlr3', repos='https://cloud.r-project.org', dependencies=TRUE)"
 RUN Rscript -e "install.packages('mlr3learners', repos='https://cloud.r-project.org')"
@@ -24,11 +24,6 @@ RUN Rscript -e "library(mlr3learners); print('mlr3learners OK')"
 
 RUN Rscript -e "install.packages('ranger', repos='https://cloud.r-project.org')"
 RUN Rscript -e "library(ranger); print('ranger OK')"
-
-RUN Rscript -e "install.packages('quanteda', repos='https://cloud.r-project.org')"
-RUN Rscript -e "install.packages('Matrix', repos='https://cloud.r-project.org')"
-RUN Rscript -e "library(quanteda); library(Matrix); print('text packages OK')"
-RUN Rscript -e "install.packages('httr', repos='https://cloud.r-project.org')"
 
 COPY app/ ./
 

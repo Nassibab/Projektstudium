@@ -91,6 +91,15 @@ services:
       ANALYSE_R_URL: http://analyse-r:8000
     restart: unless-stopped
 
+  llm-service:
+    build: ./services/LLM_service
+    container_name: groupproject_llm_service
+    ports:
+      - "8011:8011"
+    env_file:
+      - .env
+    restart: unless-stopped
+
   analyse-r:
     build: ./services/analyse-r
     container_name: groupproject_analyse-r
