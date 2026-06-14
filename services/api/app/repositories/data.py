@@ -82,3 +82,77 @@ def get_comments_for_analysis():
         })
 
     return result
+
+def save_analysis_results(payload: dict):
+    db = MongoDB()
+
+    comment_results = payload.get("comment_results", [])
+    thread_results = payload.get("thread_results", [])
+    user_results = payload.get("user_results", [])
+    model_results = payload.get("model_results", [])
+
+    bluesky_prediction_comments_results = payload.get(
+        "bluesky_prediction_comments_results", []
+    )
+    bluesky_prediction_thread_results = payload.get(
+        "bluesky_prediction_thread_results", []
+    )
+    bluesky_prediction_user_results = payload.get(
+        "bluesky_prediction_user_results", []
+    )
+    bluesky_model_results = payload.get(
+        "bluesky_model_results", []
+    )
+
+    if comment_results:
+        db.collection("comment_analysis_results").delete_many({})
+        db.collection("comment_analysis_results").insert_many(comment_results)
+
+    if thread_results:
+        db.collection("thread_analysis_results").delete_many({})
+        db.collection("thread_analysis_results").insert_many(thread_results)
+
+    if user_results:
+        db.collection("user_analysis_results").delete_many({})
+        db.collection("user_analysis_results").insert_many(user_results)
+
+    if model_results:
+        db.collection("model_results").insert_many(model_results)
+
+    if bluesky_prediction_comments_results:
+        db.collection("bluesky_prediction_comments_results").delete_many({})
+        db.collection("bluesky_prediction_comments_results").insert_many(
+            bluesky_prediction_comments_results
+        )
+
+    if bluesky_prediction_thread_results:
+        db.collection("bluesky_prediction_thread_results").delete_many({})
+        db.collection("bluesky_prediction_thread_results").insert_many(
+            bluesky_prediction_thread_results
+        )
+
+    if bluesky_prediction_user_results:
+        db.collection("bluesky_prediction_user_results").delete_many({})
+        db.collection("bluesky_prediction_user_results").insert_many(
+            bluesky_prediction_user_results
+        )
+
+    if bluesky_model_results:
+        db.collection("bluesky_prediction_model_results").delete_many({})
+        db.collection("bluesky_prediction_model_results").insert_many(
+            bluesky_model_results
+        )
+
+    db.close()
+
+    return {
+        "status": "success",
+        "comment_results": len(comment_results),
+        "thread_results": len(thread_results),
+        "user_results": len(user_results),
+        "model_results": len(model_results),
+        "bluesky_prediction_comments_results": len(bluesky_prediction_comments_results),
+        "bluesky_prediction_thread_results": len(bluesky_prediction_thread_results),
+        "bluesky_prediction_user_results": len(bluesky_prediction_user_results),
+        "bluesky_model_results": len(bluesky_model_results),
+    }

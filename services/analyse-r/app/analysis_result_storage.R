@@ -1,0 +1,130 @@
+# ------------------------------------------------------------
+# Analyse-Ergebnisse an FastAPI senden
+# ------------------------------------------------------------
+# Diese Datei trennt Ergebnisse sauber nach Ebene:
+# Kommentar-Ergebnisse, Thread-Ergebnisse, User-Ergebnisse und Modell-Ergebnisse.
+# FastAPI speichert diese anschließend in getrennte MongoDB-Collections.
+
+library(httr)
+library(jsonlite)
+library(dplyr)
+#-----------------------------------------------------------------------------------------------------
+# Baut Dokumente für professor_dataset/training: pro Kommentar, pro Thread,pro User und pro Modelllauf
+#-----------------------------------------------------------------------------------------------------
+build_analysis_result_documents <- function(full_data, results_row = NULL) {
+  
+  comment_results <- full_data %>%
+    select(
+      comment_id, thread_id, login, synthetic_role,
+      attack_score, toxicity_score, is_attacking,
+      irony, swearword_count, insult_count, negative_word_count,
+      direct_address_count, imperative_count, accusation_marker_count, mockery_marker_count,
+      reply_depth, parent_is_root, num_children,
+      thread_position_abs, thread_position_rel, num_previous_comments,
+      prev_attack_rate, prev_toxicity_score_mean, prev_attack_count,
+      prev_toxicity_score_max, prev_attack_score_max,
+      recent_attack_rate_3, recent_attack_rate_5, attack_streak_current,
+      is_target_login_numeric, target_recently_attacked, reply_after_attack,
+      target_response_context_score, date_timestamp
+    ) %>%
+    mutate(across(where(is.factor), as.character))
+
+  thread_results <- full_data %>%
+    group_by(thread_id) %>%
+    summarise(
+      thread_size = first(thread_size),
+      thread_comment_count = first(thread_comment_count),
+      thread_user_count = first(thread_user_count),
+      thread_mean_comments_per_user = first(thread_mean_comments_per_user),
+      thread_max_comments_by_one_user = first(thread_max_comments_by_one_user),
+      thread_single_comment_user_count = first(thread_single_comment_user_count),
+      thread_max_user_share = first(thread_max_user_share),
+      thread_single_comment_user_share = first(thread_single_comment_user_share),
+      mean_toxicity_score = mean(as.numeric(toxicity_score), na.rm = TRUE),
+      max_toxicity_score = max(as.numeric(toxicity_score), na.rm = TRUE),
+      mean_attack_score = mean(as.numeric(attack_score), na.rm = TRUE),
+      max_attack_score = max(as.numeric(attack_score), na.rm = TRUE),
+      mean_prev_attack_rate = mean(prev_attack_rate, na.rm = TRUE),
+      max_prev_attack_rate = max(prev_attack_rate, na.rm = TRUE),
+      mean_prev_toxicity_score_mean = mean(prev_toxicity_score_mean, na.rm = TRUE),
+      max_prev_toxicity_score_mean = max(prev_toxicity_score_mean, na.rm = TRUE),
+      max_recent_attack_rate_3 = max(recent_attack_rate_3, na.rm = TRUE),
+      max_recent_attack_rate_5 = max(recent_attack_rate_5, na.rm = TRUE),
+      max_attack_streak_current = max(attack_streak_current, na.rm = TRUE),
+      .groups = "drop"
+    )
+
+  user_results <- full_data %>%
+    group_by(login) %>%
+    summarise(
+      login_count = first(login_count),
+      login_percentage = first(login_percentage),
+      frequency_group = first(frequency_group),
+      total_comments = n(),
+      total_threads = n_distinct(thread_id),
+      mean_toxicity_score = mean(as.numeric(toxicity_score), na.rm = TRUE),
+      max_toxicity_score = max(as.numeric(toxicity_score), na.rm = TRUE),
+      mean_attack_score = mean(as.numeric(attack_score), na.rm = TRUE),
+      max_attack_score = max(as.numeric(attack_score), na.rm = TRUE),
+      mean_swearword_count = mean(swearword_count, na.rm = TRUE),
+      mean_insult_count = mean(insult_count, na.rm = TRUE),
+      mean_negative_word_count = mean(negative_word_count, na.rm = TRUE),
+      mean_prev_attack_rate = mean(prev_attack_rate, na.rm = TRUE),
+      max_prev_attack_rate = max(prev_attack_rate, na.rm = TRUE),
+      .groups = "drop"
+    )
+
+  model_results <- if (!is.null(results_row)) {
+    results_row %>% mutate(created_at = as.character(Sys.time()))
+  } else {
+    data.frame()
+  }
+
+  list(
+    comment_results = comment_results,
+    thread_results = thread_results,
+    user_results = user_results,
+    model_results = model_results
+  )
+}
+#-------------------------------------------------------------------------------------------------------
+# Speichert Trainings-/Testanalyse in die allgemeinen Analyse-Collections.
+#-------------------------------------------------------------------------------------------------------
+
+save_analysis_results_to_api <- function(comment_results, thread_results, user_results, model_results) {
+  payload <- list(
+    comment_results = comment_results,
+    thread_results = thread_results,
+    user_results = user_results,
+    model_results = model_results
+  )
+
+  response <- httr::POST(
+    url = ANALYSIS_SAVE_RESULTS_ENDPOINT,
+    body = payload,
+    encode = "json"
+  )
+
+  httr::content(response, as = "parsed")
+}
+
+#---------------------------------------------------------------------------------------------------------
+# Speichert Bluesky-Predictions getrennt von Trainingsdaten
+#---------------------------------------------------------------------------------------------------------
+save_bluesky_predictions_to_api <- function(comment_results, thread_results, user_results, model_results) {
+
+  payload <- list(
+    bluesky_prediction_comments_results = comment_results,
+    bluesky_prediction_thread_results = thread_results,
+    bluesky_prediction_user_results = user_results,
+    bluesky_model_results = model_results
+  )
+
+  response <- httr::POST(
+    url = ANALYSIS_SAVE_RESULTS_ENDPOINT,
+    body = payload,
+    encode = "json"
+  )
+
+  httr::content(response, as = "parsed")
+}
