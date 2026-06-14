@@ -1,6 +1,7 @@
 from collections import Counter
 
-#berechnet aus mehreren Kommentaren EINES Fensters zusammenfassende Werte.
+#berechnet aus MEHREREN Kommentaren EINES Fensters zusammenfassende Werte. 
+#reine Messwerte.
 
 class WindowAggregator:
     def __init__(self, window_store):
