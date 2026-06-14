@@ -11,6 +11,10 @@ from app.services.mongodb_graph_sync import (
     reset_mongo_sync_status_if_missing_in_neo4j,
 )
 
+from pydantic import BaseModel
+from typing import Any
+from app.repositories.data import save_analysis_results
+
 
 router = APIRouter()
 
@@ -105,3 +109,20 @@ def reset_missing_neo4j_sync_status():
 @router.get("/analysis/comments")
 def get_analysis_comments():
     return get_comments_for_analysis()
+
+
+class AnalysisResultsPayload(BaseModel):
+    comment_results: list[dict[str, Any]] = []
+    thread_results: list[dict[str, Any]] = []
+    user_results: list[dict[str, Any]] = []
+    model_results: list[dict[str, Any]] = []
+
+    bluesky_prediction_comments_results: list[dict[str, Any]] = []
+    bluesky_prediction_thread_results: list[dict[str, Any]] = []
+    bluesky_prediction_user_results: list[dict[str, Any]] = []
+    bluesky_model_results: list[dict[str, Any]] = []
+
+
+@router.post("/analysis/save-results")
+def save_results(payload: AnalysisResultsPayload):
+    return save_analysis_results(payload.model_dump())

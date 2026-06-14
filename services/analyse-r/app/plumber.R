@@ -1,17 +1,32 @@
+# ---------------------------------------------------------------------------
+# Plumber API für analyse-r
+# ---------------------------------------------------------------------------
+# Diese Datei stellt die R-Analyse über HTTP-Endpunkte bereit.
+
 library(plumber)
 library(jsonlite)
 library(dplyr)
 library(mlr3)
 library(mlr3learners)
 library(ranger)
+library(quanteda)
+library(Matrix)
 
 source("analysis_configuration.R")
 source("analysis_data_loader.R")
 source("professor_dataset_preprocessing.R")
-source("bluesky_data_preprocessing.R")
 source("shitstorm_model_training.R")
 source("bluesky_scenario_prediction.R")
 source("prediction_results_table.R")
+source("tfidf_feature_engineering.R")
+source("thread_feature_engineering.R")
+source("user_feature_engineering.R")
+source("toxicity_feature_engineering.R")
+source("lexicon_feature_engineering.R")
+source("context_feature_engineering.R")
+source("analysis_result_storage.R")
+source("data_type_cleaning.R")
+
 
 #* Health Check
 #* @get /health
@@ -29,19 +44,6 @@ function() {
     rows = nrow(data),
     columns = colnames(data),
     preview = head(data, 5)
-  )
-}
-
-#* Einfache Analyse
-#* @get /analyse-summary
-function() {
-  data <- load_analysis_data()
-
-  list(
-    status = "success",
-    total_comments = nrow(data),
-    platforms = as.list(table(data$source_platform)),
-    source_types = as.list(table(data$source_type))
   )
 }
 
@@ -64,63 +66,46 @@ function() {
   )
 }
 
-#* Professor-Daten 80/20 aufteilen
-#* @get /split-professor-data
-function() {
-  data <- load_analysis_data()
-  professor_data <- data[data[["source_platform"]] == "professor_dataset", ]
 
-  set.seed(RANDOM_SEED)
-
-  n <- nrow(professor_data)
-  train_indices <- sample(seq_len(n), size = floor(TRAIN_RATIO * n))
-
-  train_data <- professor_data[train_indices, ]
-  test_data <- professor_data[-train_indices, ]
-
-  list(
-    status = "success",
-    total_professor_rows = n,
-    train_rows = nrow(train_data),
-    test_rows = nrow(test_data),
-    train_preview = head(train_data, 3),
-    test_preview = head(test_data, 3)
-  )
-}
-
-#* Modelltraining mit rpart
-#* @get /train-model
-function() {
-  train_rpart_model()
-}
-
-#* Random Forest Training mit Ranger
-#* @get /train-ranger
-function() {
-  train_ranger_model()
-}
-
-#* Bluesky-Daten als JSON vorhersagen
+#* Predict Bluesky synthetic roles as JSON
 #* @get /predict-bluesky
 function() {
-  result <- predict_bluesky_scenarios()
+  predict_bluesky_synthetic_roles()
+}
+
+#* Train full synthetic role model with TF-IDF
+#* @get /train-full-model
+function() {
+  data <- load_analysis_data()
+  result <- train_full_synthetic_role_model(data)
 
   list(
     status = "success",
     model = "classif.ranger",
-    predicted_rows = nrow(result),
-    predictions = result
+    target = "synthetic_role",
+
+    total_rows = result$total_rows,
+    train_rows = result$train_rows,
+    test_rows = result$test_rows,
+
+    n_features_total = result$n_features_total,
+    n_tfidf_features = result$n_tfidf_features,
+
+    accuracy = result$accuracy,
+    classification_error = result$classification_error,
+    confusion = result$confusion,
+
+    prediction_table = result$prediction_table,
+    feature_importance = result$feature_importance,
+    top_tfidf_features = result$top_tfidf_features,
+    top_non_tfidf_features = result$top_non_tfidf_features,
+    results_row = result$results_row,
+    thread_feature_preview = result$thread_feature_preview,
+
+
+    tfidf_time_seconds = result$tfidf_time,
+    training_time_seconds = result$training_time,
+    prediction_time_seconds = result$prediction_time,
+    total_time_seconds = result$total_time
   )
-}
-
-#* Bluesky-Daten als HTML-Tabelle anzeigen
-#* @get /predict-bluesky-table
-#* @html
-function(res) {
-  result <- predict_bluesky_scenarios()
-  html <- create_prediction_html_table(result)
-
-  res$setHeader("Content-Type", "text/html; charset=utf-8")
-
-  html
 }

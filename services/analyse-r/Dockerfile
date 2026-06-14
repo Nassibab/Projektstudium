@@ -25,6 +25,11 @@ RUN Rscript -e "library(mlr3learners); print('mlr3learners OK')"
 RUN Rscript -e "install.packages('ranger', repos='https://cloud.r-project.org')"
 RUN Rscript -e "library(ranger); print('ranger OK')"
 
+RUN Rscript -e "install.packages('quanteda', repos='https://cloud.r-project.org')"
+RUN Rscript -e "install.packages('Matrix', repos='https://cloud.r-project.org')"
+RUN Rscript -e "library(quanteda); library(Matrix); print('text packages OK')"
+RUN Rscript -e "install.packages('httr', repos='https://cloud.r-project.org')"
+
 COPY app/ ./
 
 EXPOSE 8000
