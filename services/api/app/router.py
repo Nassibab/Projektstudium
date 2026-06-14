@@ -1,11 +1,14 @@
 import random
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from app.services.mongodb_graph_sync import sync_all_threads_to_graph
 from app.services.report_service import get_thread_report
 from app.importers.professor_json_importer import import_json
-from app.repositories.data import get_comments_for_analysis
+from app.repositories.data import (
+    get_comments_for_analysis,
+    get_thread_comments_for_llm,
+)
 from app.services.redis_events import iter_thread_updates, publish_thread_update
 
 from app.services.mongodb_graph_sync import (
@@ -44,6 +47,39 @@ def reset_missing_neo4j_sync_status():
 @router.get("/analysis/comments")
 def get_analysis_comments():
     return get_comments_for_analysis()
+
+
+@router.get("/threads/{thread_id}/comments/for-analysis")
+def get_thread_comments_for_analysis(
+    thread_id: str,
+    comment_ids: str | None = Query(
+        default=None,
+        description="Optional comma-separated comment_ids to restrict the subset.",
+    ),
+):
+    parsed_ids: list[int] | None = None
+    if comment_ids:
+        try:
+            parsed_ids = [
+                int(part.strip())
+                for part in comment_ids.split(",")
+                if part.strip()
+            ]
+        except ValueError:
+            raise HTTPException(
+                status_code=422,
+                detail="comment_ids must be a comma-separated list of integers",
+            )
+
+    comments = get_thread_comments_for_llm(thread_id, parsed_ids)
+
+    if not comments:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No comments found for thread '{thread_id}'",
+        )
+
+    return comments
 
 
 @router.get("/demo/stream")

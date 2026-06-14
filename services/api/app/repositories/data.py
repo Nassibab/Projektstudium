@@ -44,6 +44,35 @@ def get_all_comments_grouped_by_thread():
     return grouped
 
 
+def get_thread_comments_for_llm(
+    thread_id: str,
+    comment_ids: list[int] | None = None,
+) -> list[dict]:
+    query: dict = {"thread_id": thread_id}
+
+    if comment_ids:
+        query["comment_id"] = {"$in": comment_ids}
+
+    comments = comments_collection.find(
+        query,
+        {"_id": 0, "comment_id": 1, "text": 1},
+    )
+
+    by_id: dict[int, dict] = {}
+    for c in comments:
+        cid = c.get("comment_id")
+        text = c.get("text")
+        if cid is None or text is None:
+            continue
+        if cid not in by_id:
+            by_id[cid] = {"comment_id": cid, "text": text}
+
+    if comment_ids:
+        return [by_id[cid] for cid in comment_ids if cid in by_id]
+
+    return list(by_id.values())
+
+
 def get_comments_for_analysis():
     comments = list(comments_collection.find({}, {"_id": 0}))
     threads = list(threads_collection.find({}, {"_id": 0}))

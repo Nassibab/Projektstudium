@@ -1,9 +1,6 @@
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
-
-from .router import router
 
 
 def _load_project_env() -> None:
@@ -16,5 +13,14 @@ def _load_project_env() -> None:
 
 _load_project_env()
 
+from fastapi import FastAPI
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+
+from .limiter import limiter
+from .router import router
+
 app = FastAPI(title="LLM Service")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.include_router(router)
