@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 #from app.services.moderate import moderate
 
-from app.warning_services.moderation_warning_service import ModerationWarningService
+from app.moderation_warning_service import ModerationWarningService
 
 router = APIRouter()
 
