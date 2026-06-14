@@ -2,7 +2,6 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 
 #NUr Speichern und Zuordnen von Kommentaren zu Zeitfenstern 
-#Klasse als Zwischenspeicher
 class WindowStore:
     def __init__(self, window_minutes=5):
         # Fenstergröße
@@ -28,7 +27,7 @@ class WindowStore:
     ####### nimmt einen Kommentar entgegen ###########
     def add_comment(self, comment):
         created_at = self.parse_time(comment["created_at"])
-        thread_id = comment["thread_id"]
+        thread_id = comment["id"]
         window_start = self.get_window_start(created_at)
 
         # Kommentar speichern
