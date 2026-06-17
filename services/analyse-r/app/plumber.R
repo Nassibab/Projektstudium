@@ -7,11 +7,21 @@ library(ranger)
 
 source("analysis_configuration.R")
 source("analysis_data_loader.R")
+
+source("tfidf_feature_engineering.R")
+source("thread_feature_engineering.R")
+source("user_feature_engineering.R")
+source("toxicity_feature_engineering.R")
+source("lexicon_feature_engineering.R")
+source("context_feature_engineering.R")
+source("data_type_cleaning.R")
+
+source("analysis_result_storage.R")
+
 source("professor_dataset_preprocessing.R")
-source("bluesky_data_preprocessing.R")
 source("shitstorm_model_training.R")
 source("bluesky_scenario_prediction.R")
-source("prediction_results_table.R")
+
 
 #* Health Check
 #* @get /health
@@ -64,8 +74,16 @@ function() {
   )
 }
 
-#* Professor-Daten 80/20 aufteilen
-#* @get /split-professor-data
+
+#* Predict Bluesky synthetic roles as JSON
+#* @get /predict-bluesky
+function() {
+  predict_bluesky_synthetic_roles()
+}
+
+
+#* Train full synthetic role model with TF-IDF
+#* @get /train-full-model
 function() {
   data <- load_analysis_data()
   professor_data <- data[data[["source_platform"]] == "professor_dataset", ]

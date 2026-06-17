@@ -1,3 +1,5 @@
+
+dist
 # Environment and secrets
 .env
 .env.local

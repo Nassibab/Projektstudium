@@ -14,6 +14,7 @@ def map_comment(
     created_at=None,
     source_platform=None,
     source_type=None,
+    source_file=None,
     extra=None,
 ):
     data = {
@@ -29,6 +30,7 @@ def map_comment(
         "created_at": created_at,
 
         "source_platform": source_platform,
+        "source_file": source_file,
 
         "source_type": source_type,
     }

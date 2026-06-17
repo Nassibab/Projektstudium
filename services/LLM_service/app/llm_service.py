@@ -94,16 +94,18 @@ class LLMService:
         return ThreadAnalysisResponse(thread_id=request.thread_id, results=results)
 
     def _analyze_chunk(self, thread_id, chunk, temperature) -> list[CommentAnalysisResult]:
-        expected_ids = {c.comment_id for c in chunk}
+        expected_ids = {str(c.comment_id) for c in chunk}
+
         user_payload = json.dumps(
             {
                 "thread_id": thread_id,
                 "comments": [
-                    {"comment_id": c.comment_id, "text": c.text} for c in chunk
+                    {"comment_id": str(c.comment_id), "text": c.text} for c in chunk
                 ],
             },
             ensure_ascii=False,
         )
+
         messages = [
             {"role": "system", "content": COMMENT_ANALYSIS_SYSTEM_MESSAGE},
             {"role": "user", "content": user_payload},
@@ -121,7 +123,8 @@ class LLMService:
                 last_error = ValueError(f"{exc} | raw={snippet!r}")
                 continue
 
-            returned_ids = [item.comment_id for item in parsed.results]
+            returned_ids = [str(item.comment_id) for item in parsed.results]
+
             if set(returned_ids) != expected_ids or len(returned_ids) != len(expected_ids):
                 last_error = ValueError(
                     f"LLM comment_ids {sorted(set(returned_ids))} do not match "
@@ -131,7 +134,7 @@ class LLMService:
 
             return [
                 CommentAnalysisResult(
-                    comment_id=item.comment_id,
+                    comment_id=str(item.comment_id),
                     scores=CommentScores(
                         **item.model_dump(exclude={"comment_id"})
                     ),
@@ -164,11 +167,12 @@ class LLMService:
 
 
 def _dedupe_comments(comments):
-    seen: set[int] = set()
+    seen: set[str] = set()
     unique = []
     for comment in comments:
-        if comment.comment_id not in seen:
-            seen.add(comment.comment_id)
+        cid = str(comment.comment_id)
+        if cid not in seen:
+            seen.add(cid)
             unique.append(comment)
     return unique
 

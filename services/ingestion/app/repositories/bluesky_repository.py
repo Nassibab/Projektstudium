@@ -26,6 +26,9 @@ async def save_post(post):
         comments_count=len(post.comments),
         source_platform="bluesky",
         source_type="prediction_data",
+        extra={
+        "source_file": "bluesky",
+    },
     )
 
     await threads_collection.update_one(
@@ -53,11 +56,15 @@ async def save_comment(comment, thread_id: str):
         created_at=comment.created_at,
         source_platform="bluesky",
         source_type="prediction_data",
+        extra={
+            "source_file": "bluesky",
+        },
     )
 
     await comments_collection.update_one(
         {
             "comment_id": comment.id,
+            "thread_id": thread_id,
             "source_platform": "bluesky",
         },
         {
@@ -66,6 +73,24 @@ async def save_comment(comment, thread_id: str):
         upsert=True,
     )
 
+    real_count = await comments_collection.count_documents(
+        {
+            "thread_id": thread_id,
+            "source_platform": "bluesky",
+        }
+    )
+
+    await threads_collection.update_one(
+        {
+            "thread_id": thread_id,
+            "source_platform": "bluesky",
+        },
+        {
+            "$set": {
+                "comments_count": real_count
+            }
+        },
+    )
 
 async def get_threads():
     threads = []
