@@ -3,10 +3,12 @@
     <div class="page">
       <header class="topbar">
         <h1>Moderations-Dashboard Demo</h1>
+        <button class="debug-btn" @click="triggerPublish" title="Call /demo/publish">
+          Debug Publish
+        </button>
       </header>
 
       <section v-if="currentComment" class="dashboard">
-        <!-- 1. SCORE PANEL -->
         <div class="panel score-panel">
           <div class="panel-header">
             <div>
@@ -24,7 +26,6 @@
             {{ commentDateTime }}
           </div>
 
-          <!-- NEU: LEGENDE -->
           <div class="score-legend">
             <h4>Legende / Score-Bereiche</h4>
             <ul>
@@ -52,7 +53,6 @@
           </div>
         </div>
 
-        <!-- 2. LINE CHART PANEL -->
         <div class="panel chart-panel">
           <div class="panel-header">
             <div>
@@ -93,7 +93,6 @@
           </svg>
         </div>
 
-        <!-- 3. RADAR PANEL -->
         <div class="panel radar-panel">
           <div class="panel-header">
             <div>
@@ -148,16 +147,34 @@
         </div>
       </section>
 
-      <!-- BOTTOM SECTION -->
       <section v-if="demoData" class="bottom-section">
+        
         <div class="panel thread-panel-left">
-          <h3>Original Thread</h3>
-          <p class="thread-text">{{ demoData.thread.text }}</p>
+          <h3>Aktive Threads</h3>
+          <div class="thread-list">
+            <div 
+              v-for="(thread, index) in threadList" 
+              :key="thread.id || index"
+              class="thread-item"
+              :class="[
+                getThreadScoreClass(thread), 
+                { active: currentThread && currentThread.id === thread.id }
+              ]"
+              :title="thread.title"
+              @click="selectThread(thread)"
+            >
+              {{ truncateText(thread.title, 140) }}
+            </div>
+          </div>
         </div>
 
-        <div class="panel thread-panel-right">
-          <h2>{{ demoData.thread.title }}</h2>
+        <div class="panel thread-panel-right" v-if="currentThread">
+          <h2>Originaler Beitrag</h2>
+          <div class="thread-text-container">
+            <p class="thread-text">{{ currentThread.text }}</p>
+          </div>
 
+          <h3>Kommentare</h3>
           <div class="comments-section">
             <div 
               class="comment-card" 
@@ -199,18 +216,57 @@ export default {
   data() {
     return {
       demoData: null,
+      selectedThreadId: null,
       selectedCommentId: null,
+      eventSource: null,
     }
   },
   computed: {
+    // Unterstützt sowohl ein einzelnes thread-Objekt als auch ein threads-Array (falls die API erweitert wird)
+    threadList() {
+      if (!this.demoData) return []
+
+      if (Array.isArray(this.demoData)) {
+        return this.demoData.map((item, index) => {
+          const thread = item.thread || item
+          return {
+            ...thread,
+            id: thread.id != null ? thread.id : index,
+          }
+        })
+      }
+
+      if (this.demoData.threads && Array.isArray(this.demoData.threads)) {
+        return this.demoData.threads.map((thread, index) => ({
+          ...thread,
+          id: thread.id != null ? thread.id : index,
+        }))
+      }
+
+      if (this.demoData.thread) {
+        return [{
+          ...this.demoData.thread,
+          id: this.demoData.thread.id != null ? this.demoData.thread.id : 0,
+        }]
+      }
+
+      return []
+    },
+    currentThread() {
+      if (!this.threadList.length) return null
+      if (this.selectedThreadId !== null) {
+        return this.threadList.find(t => t.id === this.selectedThreadId) || this.threadList[0]
+      }
+      return this.threadList[0]
+    },
     sortedComments() {
-      if (!this.demoData?.thread?.comments) return []
-      return [...this.demoData.thread.comments].reverse()
+      if (!this.currentThread?.comments) return []
+      return [...this.currentThread.comments].reverse()
     },
     currentComment() {
       if (!this.sortedComments.length) return null
-      if (this.selectedCommentId === null) return this.sortedComments[0]
-      return this.sortedComments.find(c => c.id === this.selectedCommentId) || this.sortedComments[0]
+      const found = this.sortedComments.find(c => c.id === this.selectedCommentId)
+      return found || this.sortedComments[0]
     },
     commentDateTime() {
       if (!this.currentComment) return ''
@@ -255,19 +311,93 @@ export default {
     }
   },
   methods: {
+    async triggerPublish() {
+      try {
+        await fetch('http://localhost:8000/demo/publish', {
+          method: 'POST'
+        })
+        console.log('Publish endpoint triggered successfully')
+      } catch (error) {
+        console.error('Failed to trigger publish endpoint:', error)
+      }
+    },
+
     async fetchDemoData() {
       try {
         const response = await api.getDemoData()
         this.demoData = response.data
+
+        if (this.threadList.length > 0) {
+          this.selectedThreadId = this.threadList[0].id || null
+        }
       } catch (error) {
         console.error('API Error:', error)
       }
+    },
+    connectDemoStream() {
+      if (this.eventSource) return
+
+      this.eventSource = new EventSource('http://localhost:8000/demo/stream')
+
+      this.eventSource.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data)
+          this.applyThreadUpdate(payload)
+        } catch (error) {
+          console.error('SSE parse error:', error)
+        }
+      }
+
+      this.eventSource.onerror = () => {
+        console.warn('SSE connection lost, retrying...')
+      }
+    },
+    applyThreadUpdate(payload) {
+      if (!payload || !this.demoData || payload.type !== 'comment_added') return
+
+      if (!Array.isArray(this.demoData)) return
+
+      this.demoData = this.demoData.map((item) => {
+        if (!item.thread || item.thread.id !== payload.threadId) return item
+
+        return {
+          ...item,
+          thread: {
+            ...item.thread,
+            comments: [...(item.thread.comments || []), payload.comment],
+          },
+        }
+      })
+
+      this.selectedThreadId = payload.threadId
+      this.selectedCommentId = payload.comment?.id || null
+    },
+    selectThread(thread) {
+      this.selectedThreadId = thread.id;
+      // Bei Thread-Wechsel Kommentar-Auswahl zurücksetzen, 
+      // damit stattdessen der erste Kommentar des neuen Threads geladen wird
+      this.selectedCommentId = null; 
     },
     getScoreDetails(score) {
       if (score >= 0.75) return { class: 'score-rot', label: 'Kritisch' }
       if (score >= 0.50) return { class: 'score-orange', label: 'Eskalation' }
       if (score >= 0.25) return { class: 'score-gelb', label: 'Frühwarnung' }
       return { class: 'score-gruen', label: 'Normal' }
+    },
+    // Holt den Score des neuesten Kommentars des Threads
+    getThreadScoreClass(thread) {
+      if (!thread.comments || !thread.comments.length) return 'score-gruen';
+      const newestComment = [...thread.comments].reduce((latest, comment) => {
+        const latestTime = new Date(latest.time).getTime()
+        const commentTime = new Date(comment.time).getTime()
+        return commentTime > latestTime ? comment : latest
+      }, thread.comments[0])
+      return this.getScoreDetails(newestComment.score).class;
+    },
+    // Kürzt Text nach einer bestimmten Anzahl von Zeichen
+    truncateText(text, length) {
+      if (!text) return '';
+      return text.length > length ? text.substring(0, length) + '...' : text;
     },
     radarPoint(index, value = 1) {
       const totalAxes = this.currentComment?.kpis?.length || 6
@@ -306,6 +436,13 @@ export default {
   },
   mounted() {
     this.fetchDemoData()
+    this.connectDemoStream()
+  },
+  beforeUnmount() {
+    if (this.eventSource) {
+      this.eventSource.close()
+      this.eventSource = null
+    }
   },
 }
 </script>
@@ -346,11 +483,35 @@ body, html {
   box-sizing: border-box;
 }
 
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
 .topbar h1 {
-  margin: 0 0 24px 0;
+  margin: 0;
   font-size: 1.8rem;
   font-weight: 700;
   color: var(--text);
+}
+
+.debug-btn {
+  background-color: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.debug-btn:hover {
+  background-color: var(--surface-card);
+  color: var(--text);
+  border-color: var(--muted);
 }
 
 .dashboard {
@@ -431,8 +592,9 @@ body, html {
 .score-card.score-rot .score-value, .score-card.score-rot .score-label { color: #fca5a5; text-shadow: 0 0 12px rgba(239, 68, 68, 0.6); }
 .comment-score.score-rot { background-color: rgba(239, 68, 68, 0.2); color: #fca5a5; border-color: rgba(239, 68, 68, 0.4); }
 
+
 /* =========================================
-   NEU: LEGENDE STYLING
+   LEGENDE STYLING
 ========================================= */
 .score-legend {
   margin-top: 24px;
@@ -478,7 +640,7 @@ body, html {
 
 .legend-range {
   color: var(--muted);
-  font-family: monospace; /* Damit die Zahlen sauber untereinander stehen */
+  font-family: monospace;
   font-size: 0.8rem;
 }
 
@@ -630,6 +792,10 @@ body, html {
   gap: 24px;
 }
 
+/* =========================================
+   NEU: THREAD-LISTE & TEXT LAYOUT
+========================================= */
+
 .thread-panel-left {
   position: sticky;
   top: 24px;
@@ -637,20 +803,78 @@ body, html {
 }
 
 .thread-panel-left h3 {
-  margin: 0 0 12px 0;
+  margin: 0 0 16px 0;
   font-size: 1.1rem;
+}
+
+.thread-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Warnstufen Framing der Titel-Karten */
+.thread-item {
+  padding: 14px;
+  border-radius: 8px;
+  background-color: var(--surface-card);
+  border: 2px solid var(--border);
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--text);
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.thread-item:hover {
+  transform: translateX(4px);
+}
+
+.thread-item.active {
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+/* Farben basierend auf der maximalen Warnstufe des Threads */
+.thread-item.score-gruen { border-color: rgba(34, 197, 94, 0.4); background-color: rgba(34, 197, 94, 0.05); }
+.thread-item.score-gruen.active { border-color: #4ade80; }
+
+.thread-item.score-gelb { border-color: rgba(234, 179, 8, 0.4); background-color: rgba(234, 179, 8, 0.05); }
+.thread-item.score-gelb.active { border-color: #fde047; }
+
+.thread-item.score-orange { border-color: rgba(249, 115, 22, 0.4); background-color: rgba(249, 115, 22, 0.05); }
+.thread-item.score-orange.active { border-color: #fb923c; }
+
+.thread-item.score-rot { border-color: rgba(239, 68, 68, 0.5); background-color: rgba(239, 68, 68, 0.1); }
+.thread-item.score-rot.active { border-color: #f87171; box-shadow: 0 0 10px rgba(239, 68, 68, 0.2); }
+
+/* Text & Kommentar Layout rechts */
+.thread-panel-right h2 {
+  margin: 0 0 12px 0;
+  font-size: 1.4rem;
+  color: var(--accent);
+}
+
+.thread-panel-right h3 {
+  margin: 32px 0 16px 0;
+  font-size: 1.2rem;
+  border-bottom: 1px solid var(--grid-line);
+  padding-bottom: 8px;
+}
+
+.thread-text-container {
+  background-color: var(--surface-card);
+  padding: 20px;
+  border-radius: 12px;
+  border-left: 4px solid var(--accent);
 }
 
 .thread-text {
   margin: 0;
-  color: var(--muted);
+  color: #e2e8f0;
   line-height: 1.6;
-  font-size: 0.95rem;
-}
-
-.thread-panel-right h2 {
-  margin: 0 0 20px 0;
-  font-size: 1.4rem;
+  font-size: 1rem;
+  white-space: pre-wrap;
 }
 
 .comments-section {
