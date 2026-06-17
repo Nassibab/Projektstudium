@@ -11,6 +11,9 @@ add_user_features <- function(data) {
 
   data$login[is.na(data$login) | trimws(as.character(data$login)) == ""] <- "unknown_user"
 
+# ------------------------------------------------------------
+# Frequency & User variables
+# ------------------------------------------------------------
   user_counts <- data %>%
     count(login, name = "login_count") %>%
     mutate(

@@ -44,6 +44,7 @@ def import_json():
                         "label_shitstorm": thread.get("label_shitstorm"),
                         "description": thread.get("description"),
                         "source_file": filename,
+                        "is_long_thread":thread.get("is_long_thread"),
                     },
                 )
             )
@@ -59,6 +60,7 @@ def import_json():
                         created_at=msg.get("created"),
                         source_platform="professor_dataset",
                         source_type="training/test",
+                        source_file=filename,
                         extra={
                             "subject": msg.get("subject"),
                             "synthetic": msg.get("synthetic"),

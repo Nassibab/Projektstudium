@@ -1,11 +1,10 @@
+
 # ------------------------------------------------------------
-# Kontextfeatures für Attack-/Toxicity-Verläufe
+# Kontextvariablen mit vorherigen Attack-/Toxicity-Verläufen
 # ------------------------------------------------------------
-# Diese Funktion nutzt vorhandene attack_score/toxicity_score-Werte und berechnet
-# daraus Verlaufsvariablen pro Thread: vorherige Attacken, Attack-Raten,
-# Toxicity-Historie, Recent-Attack-Rates und Attack-Streaks.
 
 add_context_features <- function(data) {
+  data <- use_llm_features_if_available(data)
   if (!"attack_score" %in% names(data)) {
     data$attack_score <- 1L
   }
@@ -70,6 +69,10 @@ add_context_features <- function(data) {
     ) %>%
     ungroup()
 
+# -------------------------------------------------------------------------------
+# Attack-Streak berechnen
+# -------------------------------------------------------------------------------
+
   data <- data %>%
     group_by(thread_id) %>%
     arrange(sort_timestamp, id, .by_group = TRUE) %>%
@@ -94,6 +97,10 @@ add_context_features <- function(data) {
       })
     ) %>%
     ungroup()
+
+# -------------------------------------------------------------------------------
+# Target-Kontextvariablen
+# -------------------------------------------------------------------------------
 
   data <- data %>%
     group_by(thread_id) %>%

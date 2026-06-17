@@ -148,14 +148,51 @@ train_full_synthetic_role_model <- function(data) {
     prediction_time_per_row_sec = prediction_time_per_row
   )
 
-  documents <- build_analysis_result_documents(full_data = full_data, results_row = results_row)
+prob_df <- as.data.frame(pred$prob)
+names(prob_df) <- paste0("prob_class_", names(prob_df))
 
-  save_status <- save_analysis_results_to_api(
-    documents$comment_results,
-    documents$thread_results,
-    documents$user_results,
-    documents$model_results
-  )
+test_labeled_output <- test_data %>%
+  mutate(
+    true_synthetic_role = as.character(test_truth),
+    predicted_synthetic_role = as.character(pred$response),
+    analysis_saved_at = as.character(Sys.time())
+  ) %>%
+  bind_cols(prob_df) %>%
+  mutate(across(where(is.factor), as.character))
+
+documents <- build_professor_test_result_documents(
+  test_data = test_data,
+  pred = pred,
+  test_truth = test_truth,
+  results_row = results_row
+)
+
+save_status <- save_professor_test_predictions_to_api(
+  comment_results = documents$comment_results,
+  thread_results = documents$thread_results,
+  user_results = documents$user_results,
+  model_results = documents$model_results
+)
+
+# ------------------------------------------------------------
+# Modell speichern, damit es später nicht neu trainiert wird
+# ------------------------------------------------------------
+if (!dir.exists(MODEL_DIR)) {
+  dir.create(MODEL_DIR, recursive = TRUE)
+}
+
+model_bundle <- list(
+  learner = learner,
+  train_data_for_tfidf = train_data,
+  train_model_template = train_model_data,
+  feature_cols = feature_cols,
+  created_at = as.character(Sys.time()),
+  model_name = MODEL_NAME,
+  accuracy = accuracy
+)
+
+saveRDS(model_bundle, MODEL_PATH)
+
 
   list(
     learner = learner,

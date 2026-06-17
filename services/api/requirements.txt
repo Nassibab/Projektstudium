@@ -3,9 +3,5 @@ uvicorn[standard]==0.32.0
 pymongo
 python-dotenv
 neo4j
-fastapi==0.115.0
-uvicorn[standard]==0.32.0
-pymongo
-python-dotenv
-neo4j
 redis>=5.0.0
+requests

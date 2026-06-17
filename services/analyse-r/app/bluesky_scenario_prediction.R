@@ -185,50 +185,42 @@ build_bluesky_result_documents <- function(bluesky_data, pred, predicted_role) {
 
 
 # ----------------------------------------------------------------------------------
-# Trainiert auf professor_dataset und predicted anschließend nur Bluesky-Daten.
+# Lädt gespeichertes Professor-Modell und predicted Bluesky.
+# Trainiert NICHT neu.
 # ----------------------------------------------------------------------------------
 predict_bluesky_synthetic_roles <- function() {
-  data <- load_analysis_data()
+  data <- load_analysis_bluesky ()
 
-  train_data <- prepare_full_training_data(data)
-  bluesky_data <- prepare_full_bluesky_data(data)
-
-  tfidf_result <- create_tfidf_features(train_data, bluesky_data)
-
-  missing_structure_features <- setdiff(STRUCTURE_FEATURES, names(bluesky_data))
-
-  if (length(missing_structure_features) > 0) {
-    stop(paste(
-      "Folgende Bluesky-Strukturfeatures fehlen:",
-      paste(missing_structure_features, collapse = ", ")
-    ))
+  if (!file.exists(MODEL_PATH)) {
+    stop("Kein gespeichertes Modell gefunden. Bitte zuerst /train-full-model ausführen.")
   }
 
-  train_model_data <- train_data[, c("synthetic_role", STRUCTURE_FEATURES), drop = FALSE]
-  bluesky_model_data <- bluesky_data[, STRUCTURE_FEATURES, drop = FALSE]
+  # Gespeichertes Modell laden
+  model_bundle <- readRDS(MODEL_PATH)
 
-  train_model_data <- cbind(train_model_data, tfidf_result$train_tfidf)
+  learner <- model_bundle$learner
+  train_data <- model_bundle$train_data_for_tfidf
+  train_model_template <- model_bundle$train_model_template
+  feature_cols <- model_bundle$feature_cols
+
+  # Bluesky-Daten vorbereiten
+  bluesky_data <- prepare_full_bluesky_data(data)
+
+  # TF-IDF mit Professor-Trainingsdaten als Referenz bauen
+  tfidf_result <- create_tfidf_features(train_data, bluesky_data)
+
+  # Strukturfeatures + TF-IDF für Bluesky bauen
+  bluesky_model_data <- bluesky_data[, STRUCTURE_FEATURES, drop = FALSE]
   bluesky_model_data <- cbind(bluesky_model_data, tfidf_result$test_tfidf)
 
-  train_model_data <- handle_missing_values(train_model_data)
+  # Missing Values und Faktor-Level an Trainingsmodell anpassen
   bluesky_model_data <- handle_missing_values(bluesky_model_data)
-  bluesky_model_data <- align_factor_levels(train_model_data, bluesky_model_data)
+  bluesky_model_data <- align_factor_levels(train_model_template, bluesky_model_data)
 
-  task <- TaskClassif$new(
-    id = "bluesky_prediction_model",
-    backend = train_model_data,
-    target = "synthetic_role"
-  )
+  # Gleiche Spalten-Reihenfolge wie beim Training
+  bluesky_model_data <- bluesky_model_data[, feature_cols, drop = FALSE]
 
-  learner <- lrn(
-    "classif.ranger",
-    predict_type = "prob",
-    importance = "impurity",
-    num.threads = RANGER_NUM_THREADS
-  )
-
-  learner$train(task)
-
+  # Prediction ohne Label
   pred <- learner$predict_newdata(bluesky_model_data)
 
   predicted_role <- as.character(pred$response)
@@ -270,7 +262,7 @@ predict_bluesky_synthetic_roles <- function() {
 
   list(
     status = "success",
-    model = "classif.ranger",
+    model_loaded_from = MODEL_PATH,
     target = "synthetic_role",
     predicted_rows = nrow(result),
     predictions = head(result, 100),

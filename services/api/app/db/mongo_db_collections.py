@@ -28,6 +28,8 @@ def init_database():
 
     db.collection("model_results").create_index("model")
     db.collection("model_results").create_index("created_at")
+    
+    db.collection("llm_analysis_results").create_index("thread_id")
 
     db.collection("moderation_suggestions").create_index("analysis_result_id")
 

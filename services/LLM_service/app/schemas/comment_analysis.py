@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 
 class CommentInput(BaseModel):
-    comment_id: int
+    comment_id: str | int
     text: str = Field(..., min_length=1)
 
 
@@ -29,7 +29,7 @@ class CommentScores(BaseModel):
 
 
 class CommentAnalysisResult(BaseModel):
-    comment_id: int
+    comment_id: str | int
     scores: CommentScores
 
 
@@ -41,7 +41,7 @@ class ThreadAnalysisResponse(BaseModel):
 class LLMRawCommentScore(CommentScores):
     """Exact per-comment shape the LLM is asked to emit: comment_id + flat scores."""
 
-    comment_id: int
+    comment_id: str | int
 
 
 class LLMRawOutput(BaseModel):

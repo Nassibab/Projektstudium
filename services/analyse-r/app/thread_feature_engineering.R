@@ -129,6 +129,10 @@ add_thread_features <- function(data) {
     ) %>%
     ungroup()
 
+# ---------------------------------------------------------------------------
+# User-Aktivität innerhalb eines Threads
+# ---------------------------------------------------------------------------
+
   data <- data %>%
     group_by(thread_id, login) %>%
     arrange(sort_timestamp, row_id_temp, .by_group = TRUE) %>%
@@ -145,6 +149,10 @@ add_thread_features <- function(data) {
       )
     )
 
+# ---------------------------------------------------------------------------
+# Reply Depth je Thread berechnen
+# ---------------------------------------------------------------------------
+
   reply_depth_data <- data %>%
     group_by(thread_id) %>%
     arrange(sort_timestamp, row_id_temp, .by_group = TRUE) %>%
@@ -156,6 +164,10 @@ add_thread_features <- function(data) {
 
   data <- data %>%
     left_join(reply_depth_data, by = "row_id_temp")
+
+# --------------------------------------------------------------------------
+# Anzahl direkter Antworten pro Kommentar berechnen
+# --------------------------------------------------------------------------
 
   children_counts <- data %>%
     filter(!is.na(structure_parent), structure_parent != "", structure_parent != "0") %>%
@@ -169,6 +181,10 @@ add_thread_features <- function(data) {
     mutate(
       num_children = ifelse(is.na(num_children), 0L, num_children)
     )
+
+# --------------------------------------------------------------------------
+# Prüfen, ob Parent-Kommentar der Root-Kommentar des Threads ist
+# --------------------------------------------------------------------------
 
   root_lookup <- data %>%
     group_by(thread_id) %>%
@@ -191,6 +207,10 @@ add_thread_features <- function(data) {
     ) %>%
     select(-root_structure_id)
 
+# -------------------------------------------------------------------------
+# Zielaccount-Variable
+# -------------------------------------------------------------------------
+
   if ("target_login" %in% names(data)) {
     data <- data %>%
       mutate(
@@ -205,6 +225,11 @@ add_thread_features <- function(data) {
   } else {
     data$is_target_login_numeric <- 0L
   }
+
+
+# -------------------------------------------------------------------------
+# Zusätzliche Thread-Frequenzvariablen
+# -------------------------------------------------------------------------
 
   thread_frequency_vars <- data %>%
     group_by(thread_id) %>%

@@ -17,6 +17,28 @@ coerce_analysis_column_types <- function(data) {
 }
 
 handle_missing_values <- function(data) {
+
+  numeric_force_cols <- c(
+    "is_attacking",
+    "attack_score",
+    "toxicity_score",
+    "irony",
+    "swearword_count",
+    "negative_word_count",
+    "insult_count",
+    "direct_address_count",
+    "imperative_count",
+    "accusation_marker_count",
+    "mockery_marker_count"
+  )
+
+  for (col in intersect(numeric_force_cols, names(data))) {
+    data[[col]] <- suppressWarnings(
+      as.numeric(as.character(data[[col]]))
+    )
+    data[[col]][is.na(data[[col]])] <- 0
+  }
+
   numeric_cols <- names(data)[sapply(data, is.numeric) | sapply(data, is.integer)]
 
   for (col in numeric_cols) {

@@ -5,18 +5,23 @@
 # Feature Engineering und Speicherung dieselben Parameter verwenden.
 
 API_URL <- "http://api:8000"
-ANALYSIS_COMMENTS_ENDPOINT <- paste0(API_URL, "/analysis/comments")
+
+ANALYSIS_COMMENTS_ENDPOINT <- paste0(API_URL, "/analysis/training/prof-comments/all")
+ANALYSIS_BLUESKY_ENDPOINT <- paste0(API_URL, "/analysis/bluesky/prediction-data")
 ANALYSIS_SAVE_RESULTS_ENDPOINT <- paste0(API_URL, "/analysis/save-results")
 
 MODEL_NAME <- "ranger_structure_tfidf_unigram_bigram_best_importance"
 SEED_VALUE <- 42
 TRAIN_RATIO <- 0.8
 
+# Beste bisherige TF-IDF-Konfiguration
 TFIDF_TOP_N <- 1500
 TFIDF_MIN_TERMFREQ <- 20
 NGRAM_MIN <- 1
 NGRAM_MAX <- 2
 
+
+# Bestes Hauptmodell:
 RANGER_NUM_THREADS <- max(1, parallel::detectCores() - 1)
 
 ROLE_LABELS <- c(
@@ -144,3 +149,10 @@ FLOAT_COLUMNS <- c(
   "thread_max_user_share", "thread_single_comment_user_share",
   "prev_attack_rate", "prev_toxicity_score_mean"
 )
+
+
+# ------------------------------------------------------------
+# Speicherort für trainiertes Professor-Modell
+# ------------------------------------------------------------
+MODEL_DIR <- "models"
+MODEL_PATH <- file.path(MODEL_DIR, "professor_synthetic_role_model.rds")

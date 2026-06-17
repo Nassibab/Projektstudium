@@ -14,18 +14,20 @@ library(Matrix)
 
 source("analysis_configuration.R")
 source("analysis_data_loader.R")
-source("professor_dataset_preprocessing.R")
-source("shitstorm_model_training.R")
-source("bluesky_scenario_prediction.R")
-source("prediction_results_table.R")
+
 source("tfidf_feature_engineering.R")
 source("thread_feature_engineering.R")
 source("user_feature_engineering.R")
 source("toxicity_feature_engineering.R")
 source("lexicon_feature_engineering.R")
 source("context_feature_engineering.R")
-source("analysis_result_storage.R")
 source("data_type_cleaning.R")
+
+source("analysis_result_storage.R")
+
+source("professor_dataset_preprocessing.R")
+source("shitstorm_model_training.R")
+source("bluesky_scenario_prediction.R")
 
 
 #* Health Check
@@ -72,6 +74,7 @@ function() {
 function() {
   predict_bluesky_synthetic_roles()
 }
+
 
 #* Train full synthetic role model with TF-IDF
 #* @get /train-full-model
