@@ -17,6 +17,7 @@ source("context_feature_engineering.R")
 source("data_type_cleaning.R")
 
 source("analysis_result_storage.R")
+source("model_bundle_utils.R")
 
 source("professor_dataset_preprocessing.R")
 source("shitstorm_model_training.R")

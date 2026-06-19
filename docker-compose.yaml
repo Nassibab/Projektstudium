@@ -1,9 +1,8 @@
-version: '3.9'
+name: psb1-127
 
 services:
   api:
     build: ./services/api
-    container_name: groupproject_api
     ports:
       - "8000:8000"
     depends_on:
@@ -17,25 +16,23 @@ services:
       NEO4J_USER: neo4j
       NEO4J_PASSWORD: password
       ANALYSE_URL: http://analyse-py:8000
+      ANALYSE_R_URL: http://analyse-r:8000
     restart: unless-stopped
 
   frontend:
     build: ./services/frontend
-    container_name: groupproject_frontend
     ports:
       - "3000:3000"
     restart: unless-stopped
 
   redis:
     image: redis:7-alpine
-    container_name: groupproject_redis
     ports:
       - "6379:6379"
     restart: unless-stopped
 
   mongodb:
     image: mongo:4.4
-    container_name: groupproject_mongodb
     ports:
       - "27017:27017"
     volumes:
@@ -45,7 +42,6 @@ services:
 
   mongo-express:
     image: mongo-express:latest
-    container_name: groupproject_mongo_express
     ports:
       - "8081:8081"
     environment:
@@ -59,7 +55,6 @@ services:
 
   neo4j:
     image: neo4j:5
-    container_name: groupproject_neo4j
     ports:
       - "7474:7474"
       - "7687:7687"
@@ -71,7 +66,6 @@ services:
 
   ingestion:
     build: ./services/ingestion
-    container_name: groupproject_ingestion
     ports:
       - "8001:8001"
     depends_on:
@@ -83,7 +77,6 @@ services:
 
   analyse-py:
     build: ./services/analyse-py
-    container_name: groupproject_analyse-py
     ports:
       - "8010:8000"
     depends_on:
@@ -97,7 +90,6 @@ services:
 
   llm-service:
     build: ./services/LLM_service
-    container_name: groupproject_llm_service
     ports:
       - "8011:8011"
     env_file:
@@ -106,7 +98,6 @@ services:
 
   analyse-r:
     build: ./services/analyse-r
-    container_name: groupproject_analyse-r
     ports:
       - "8020:8000"
     depends_on:
@@ -114,11 +105,14 @@ services:
     environment:
       API_URL: http://api:8000
       MODERATION_URL: http://moderation:8000
+      MODEL_DOWNLOAD_URL: ${MODEL_DOWNLOAD_URL:-}
+    mem_limit: 3g
+    volumes:
+      - analyse_r_models:/app/models
     restart: unless-stopped
 
   moderation:
     build: ./services/moderation
-    container_name: groupproject_moderation
     ports:
       - "8030:8000"
     environment:
@@ -129,3 +123,4 @@ services:
 volumes:
   mongodb_data: {}
   neo4j_data: {}
+  analyse_r_models: {}

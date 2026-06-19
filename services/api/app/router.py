@@ -17,10 +17,12 @@ from app.importers.professor_json_importer import import_json
 from app.database_services.mongo_data_service import (
      get_all_comments_for_analysis,
      save_analysis_results,
-     get_bluesky_comments_for_prediction
+     get_bluesky_comments_for_prediction,
+     get_bluesky_analysis_results,
 )
 from app.importers.professor_llm_json_importer import import_professor_llm_dataset
 from app.services.redis_events import iter_thread_updates, publish_thread_update
+from app.services.bluesky_pipeline_service import run_bluesky_analysis
 
 
 router = APIRouter()
@@ -227,6 +229,22 @@ class AnalysisResultsPayload(BaseModel):
 def save_results(payload: AnalysisResultsPayload):
     return save_analysis_results(payload.model_dump())
 
+
+# ------------------------------------------------------------------------------
+# Verbindet Ingestion und Analyse: erzeugt LLM-Features und startet danach die
+# R-Prediction. Manueller Aufruf (Button/curl), kein Scheduler.
+# ------------------------------------------------------------------------------
+@router.post("/pipeline/bluesky/run")
+def run_bluesky_pipeline():
+    return run_bluesky_analysis()
+
+
+# ------------------------------------------------------------------------------
+# Read-Endpoint: liefert die fertigen Bluesky-Analyseergebnisse aus MongoDB.
+# ------------------------------------------------------------------------------
+@router.get("/analysis/bluesky/results")
+def read_bluesky_analysis_results():
+    return get_bluesky_analysis_results()
 
 
 @router.get("/demo-data")

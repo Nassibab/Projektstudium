@@ -197,31 +197,47 @@ predict_bluesky_synthetic_roles <- function() {
 
   # Gespeichertes Modell laden
   model_bundle <- readRDS(MODEL_PATH)
+  model_bundle <- slim_model_bundle(model_bundle)
 
   learner <- model_bundle$learner
   train_data <- model_bundle$train_data_for_tfidf
   train_model_template <- model_bundle$train_model_template
   feature_cols <- model_bundle$feature_cols
+  rm(model_bundle)
+  gc(full = TRUE)
 
   # Bluesky-Daten vorbereiten
   bluesky_data <- prepare_full_bluesky_data(data)
+  rm(data)
+  gc(full = TRUE)
 
   # TF-IDF mit Professor-Trainingsdaten als Referenz bauen
   tfidf_result <- create_tfidf_features(train_data, bluesky_data)
+  rm(train_data)
+  gc(full = TRUE)
 
   # Strukturfeatures + TF-IDF für Bluesky bauen
-  bluesky_model_data <- bluesky_data[, STRUCTURE_FEATURES, drop = FALSE]
-  bluesky_model_data <- cbind(bluesky_model_data, tfidf_result$test_tfidf)
+  bluesky_structure <- bluesky_data[, STRUCTURE_FEATURES, drop = FALSE]
+  bluesky_structure <- handle_missing_values(bluesky_structure)
+  bluesky_structure <- align_factor_levels(train_model_template, bluesky_structure)
+  bluesky_x <- combine_structure_and_tfidf(bluesky_structure, tfidf_result$test_tfidf)
 
-  # Missing Values und Faktor-Level an Trainingsmodell anpassen
-  bluesky_model_data <- handle_missing_values(bluesky_model_data)
-  bluesky_model_data <- align_factor_levels(train_model_template, bluesky_model_data)
-
-  # Gleiche Spalten-Reihenfolge wie beim Training
-  bluesky_model_data <- bluesky_model_data[, feature_cols, drop = FALSE]
+  stopifnot(identical(colnames(bluesky_x), feature_cols))
 
   # Prediction ohne Label
-  pred <- learner$predict_newdata(bluesky_model_data)
+  pred_response <- predict(learner, data = bluesky_x, type = "response")$predictions
+  pred_prob <- predict(learner, data = bluesky_x)$predictions
+
+  if (is.matrix(pred_response)) {
+    pred_response <- colnames(pred_prob)[max.col(pred_response, ties.method = "first")]
+  }
+
+  pred <- list(
+    response = pred_response,
+    prob = as.data.frame(pred_prob)
+  )
+  rm(bluesky_x, learner)
+  gc(full = TRUE)
 
   predicted_role <- as.character(pred$response)
 

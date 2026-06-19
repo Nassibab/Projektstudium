@@ -15,7 +15,8 @@ NGRAM_MAX <- 2
 
 
 # Bestes Hauptmodell:
-RANGER_NUM_THREADS <- max(1, parallel::detectCores() - 1)
+# Single thread keeps memory stable inside Docker (~4 GB limit).
+RANGER_NUM_THREADS <- 1L
 
 ROLE_LABELS <- c(
   "1" = "root",

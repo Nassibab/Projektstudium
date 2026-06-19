@@ -26,7 +26,9 @@ RUN Rscript -e "install.packages('ranger', repos='https://cloud.r-project.org')"
 RUN Rscript -e "library(ranger); print('ranger OK')"
 
 COPY app/ ./
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 EXPOSE 8000
 
-CMD ["Rscript", "-e", "pr <- plumber::plumb('plumber.R'); pr$run(host='0.0.0.0', port=8000)"]
+CMD ["/entrypoint.sh"]

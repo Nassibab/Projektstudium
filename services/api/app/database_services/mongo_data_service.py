@@ -1,7 +1,9 @@
+import logging
 from collections import defaultdict
 from app.db.mongo import MongoDB
 from datetime import datetime
 
+logger = logging.getLogger("bluesky_pipeline")
 
 mongo = MongoDB()
 
@@ -425,4 +427,35 @@ def save_analysis_results(payload: dict):
         "professor_test_thread_results": len(professor_test_thread_results),
         "professor_test_user_results": len(professor_test_user_results),
         "professor_test_model_results": len(professor_test_model_results)
+    }
+
+
+#------------------------------------------------------------------------------------
+# Liest die fertigen Bluesky-Analyseergebnisse aus MongoDB.
+# Das ist der Read-Endpoint, mit dem sich der Consumer (Frontend/Moderation)
+# verbindet, um die analysierten Daten zu bekommen.
+#------------------------------------------------------------------------------------
+
+def get_bluesky_analysis_results():
+    comments = list(
+        mongo.collection("bluesky_prediction_comments_results").find({}, {"_id": 0})
+    )
+    threads = list(
+        mongo.collection("bluesky_prediction_thread_results").find({}, {"_id": 0})
+    )
+    users = list(
+        mongo.collection("bluesky_prediction_user_results").find({}, {"_id": 0})
+    )
+
+    logger.info(
+        "Bluesky results read: %s comments, %s threads, %s users",
+        len(comments),
+        len(threads),
+        len(users),
+    )
+
+    return {
+        "comments": comments,
+        "threads": threads,
+        "users": users,
     }

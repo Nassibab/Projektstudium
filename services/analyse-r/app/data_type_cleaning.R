@@ -68,3 +68,25 @@ align_factor_levels <- function(train_data, new_data, target = "synthetic_role")
 
   new_data
 }
+
+structure_to_numeric_matrix <- function(df) {
+  mat <- vapply(names(df), function(col) {
+    x <- df[[col]]
+    if (is.factor(x)) {
+      as.numeric(x)
+    } else {
+      as.numeric(x)
+    }
+  }, numeric(nrow(df)))
+
+  colnames(mat) <- names(df)
+  mat
+}
+
+combine_structure_and_tfidf <- function(structure_df, tfidf_sparse) {
+  structure_mat <- structure_to_numeric_matrix(structure_df)
+  structure_sparse <- Matrix::Matrix(structure_mat, sparse = TRUE)
+  combined <- Matrix::cbind2(structure_sparse, tfidf_sparse)
+  colnames(combined) <- c(colnames(structure_mat), colnames(tfidf_sparse))
+  combined
+}
