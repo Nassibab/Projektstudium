@@ -19,6 +19,7 @@ from app.database_services.mongo_data_service import (
      save_analysis_results,
      get_bluesky_comments_for_prediction,
      get_bluesky_analysis_results,
+     get_bluesky_analysis_summary,
 )
 from app.importers.professor_llm_json_importer import import_professor_llm_dataset
 from app.services.redis_events import iter_thread_updates, publish_thread_update
@@ -238,20 +239,67 @@ def save_results(payload: AnalysisResultsPayload):
 # R-Prediction. Manueller Aufruf (Button/curl), kein Scheduler.
 # ------------------------------------------------------------------------------
 class BlueskyRunRequest(BaseModel):
-    thread_id: str | None = None
+    url: str | None = None           # Bluesky post URL; triggers ingestion
+    thread_id: str | None = None     # skip ingestion and analyze an existing thread
+    stream_seconds: int = 30         # live stream window during ingestion
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "url": "https://bsky.app/profile/forbes.com/post/3moldcodl3b2u",
+                    "thread_id": None,
+                    "stream_seconds": 30,
+                }
+            ]
+        }
+    }
 
 
 @router.post("/pipeline/bluesky/run")
 def run_bluesky_pipeline(body: BlueskyRunRequest = BlueskyRunRequest()):
-    return run_bluesky_analysis(thread_id=body.thread_id)
+    return run_bluesky_analysis(
+        thread_id=body.thread_id,
+        url=body.url,
+        stream_seconds=body.stream_seconds,
+    )
 
 
 # ------------------------------------------------------------------------------
 # Read-Endpoint: liefert die fertigen Bluesky-Analyseergebnisse aus MongoDB.
+# Optionale Filter (Rolle, Score-Schwellen, User) und Pagination für Consumer.
 # ------------------------------------------------------------------------------
 @router.get("/analysis/bluesky/results")
-def read_bluesky_analysis_results(thread_id: str | None = Query(default=None)):
-    return get_bluesky_analysis_results(thread_id=thread_id)
+def read_bluesky_analysis_results(
+    thread_id: str | None = Query(default=None),
+    predicted_synthetic_role: str | None = Query(default=None),
+    min_toxicity_score: float | None = Query(default=None),
+    min_attack_score: float | None = Query(default=None),
+    login: str | None = Query(default=None),
+    limit: int | None = Query(default=None, ge=1),
+    offset: int = Query(default=0, ge=0),
+):
+    return get_bluesky_analysis_results(
+        thread_id=thread_id,
+        predicted_synthetic_role=predicted_synthetic_role,
+        min_toxicity_score=min_toxicity_score,
+        min_attack_score=min_attack_score,
+        login=login,
+        limit=limit,
+        offset=offset,
+    )
+
+
+# ------------------------------------------------------------------------------
+# Aggregierte Zusammenfassung pro Thread (Rollenverteilung, Score-Mittelwerte,
+# Top-Risiko-Kommentare) für Vorschlags-/Aggregations-Consumer.
+# ------------------------------------------------------------------------------
+@router.get("/analysis/bluesky/summary")
+def read_bluesky_analysis_summary(
+    thread_id: str | None = Query(default=None),
+    top_n: int = Query(default=10, ge=1),
+):
+    return get_bluesky_analysis_summary(thread_id=thread_id, top_n=top_n)
 
 
 @router.get("/demo-data")

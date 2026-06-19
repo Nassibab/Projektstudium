@@ -213,7 +213,15 @@ async def comment_consumer():
 # Producer: Jetstream WebSocket → queue
 # ---------------------------------------------------------------------------
 
-async def _stream_comments(ws_url: str, post_id: str | None = None):     # ← new shared core
+async def _stream_comments(
+    ws_url: str,
+    post_id: str | None = None,
+    out_queue: "asyncio.Queue[Comment] | None" = None,
+):
+    # Default to the module-level queue so the infinite /stream path keeps
+    # working; timed ingestion passes its own isolated queue.
+    if out_queue is None:
+        out_queue = queue
     while True:
         try:
             async with websockets.connect(ws_url, ping_interval=20) as ws:
@@ -254,7 +262,7 @@ async def _stream_comments(ws_url: str, post_id: str | None = None):     # ← n
                         parent_id=extract_reply_parent(record),
                         created_at=created_at,
                     )
-                    await queue.put(comment)
+                    await out_queue.put(comment)
 
         except websockets.exceptions.ConnectionClosed as e:
             print(f"  Connection closed ({e}), reconnecting in {RECONNECT_DELAY}s...")
@@ -264,20 +272,26 @@ async def _stream_comments(ws_url: str, post_id: str | None = None):     # ← n
             await asyncio.sleep(RECONNECT_DELAY)
 
 
-async def stream_post_comments(post_id: str):
+async def stream_post_comments(
+    post_id: str,
+    out_queue: "asyncio.Queue[Comment] | None" = None,
+):
     ws_url = build_ws_url(did=None)
     print(f"\n  Listening for new comments on post: {post_id}")
     print(f"  WebSocket: {ws_url}\n")
     print("-" * 60)
-    await _stream_comments(ws_url, post_id=post_id)                       # ← delegates to shared core
+    await _stream_comments(ws_url, post_id=post_id, out_queue=out_queue)   # ← delegates to shared core
 
 
-async def stream_account_comments(did: str):
+async def stream_account_comments(
+    did: str,
+    out_queue: "asyncio.Queue[Comment] | None" = None,
+):
     ws_url = build_ws_url(did=did)
     print(f"\n  Listening for new comments from DID: {did}")
     print(f"  WebSocket: {ws_url}\n")
     print("-" * 60)
-    await _stream_comments(ws_url)                                         # ← delegates to shared core
+    await _stream_comments(ws_url, out_queue=out_queue)                    # ← delegates to shared core
 
 # ---------------------------------------------------------------------------
 # Entry point

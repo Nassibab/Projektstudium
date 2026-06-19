@@ -11,6 +11,7 @@ from app.services.llm_analysis_service import (
 logger = logging.getLogger("bluesky_pipeline")
 
 ANALYSE_R_URL = os.getenv("ANALYSE_R_URL", "http://analyse-r:8000")
+INGESTION_URL = os.getenv("INGESTION_URL", "http://ingestion:8001")
 
 # R prediction loads a model and processes the whole thread, so it can take a
 # few minutes. Keep the timeout generous so a slow run is not mistaken for a hang.
@@ -27,9 +28,42 @@ PREDICT_TIMEOUT_SECONDS = 600
 #   2. analyse-r /predict-bluesky aufrufen (R liest Daten, predicted und
 #      speichert die Ergebnisse selbst über /analysis/save-results zurück).
 # ------------------------------------------------------------------------------
-def run_bluesky_analysis(thread_id: str | None = None) -> dict:
+def run_bluesky_analysis(
+    thread_id: str | None = None,
+    url: str | None = None,
+    stream_seconds: int = 30,
+) -> dict:
     scope = f"thread_id={thread_id}" if thread_id else "all threads"
     logger.info("Bluesky run started (%s)", scope)
+
+    # Step 0: Ingest a post URL (snapshot + timed live stream). When a url is
+    # given, the ingested post's thread_id drives the rest of the pipeline.
+    ingest_result = None
+    if url:
+        logger.info("Step 0: ingesting %s (%ss stream)...", url, stream_seconds)
+        try:
+            response = requests.post(
+                f"{INGESTION_URL}/ingest/post",
+                json={"url": url, "stream_seconds": stream_seconds},
+                timeout=stream_seconds + 60,
+            )
+            response.raise_for_status()
+            ingest_result = response.json()
+        except requests.RequestException as exc:
+            logger.exception("Bluesky run FAILED at step ingest")
+            return {
+                "status": "error",
+                "step": "ingest",
+                "message": str(exc),
+            }
+
+        thread_id = ingest_result.get("thread_id")
+        logger.info(
+            "Step 0 done: %s initial, %s streamed (thread_id=%s)",
+            ingest_result.get("initial_comments"),
+            ingest_result.get("streamed_comments"),
+            thread_id,
+        )
 
     # Step 1: LLM features (one thread, or all bluesky threads)
     logger.info("Step 1/2: LLM analysis...")
@@ -44,6 +78,7 @@ def run_bluesky_analysis(thread_id: str | None = None) -> dict:
             "status": "error",
             "step": "llm",
             "message": llm_result.get("message"),
+            "ingest": ingest_result,
             "llm": llm_result,
         }
 
@@ -70,6 +105,7 @@ def run_bluesky_analysis(thread_id: str | None = None) -> dict:
             "status": "error",
             "step": "predict",
             "message": str(exc),
+            "ingest": ingest_result,
             "llm": llm_result,
         }
 
@@ -79,6 +115,7 @@ def run_bluesky_analysis(thread_id: str | None = None) -> dict:
     return {
         "status": "success",
         "thread_id": thread_id,
+        "ingest": ingest_result,
         "llm": llm_result,
         "predict": {
             "status": predict_result.get("status"),

@@ -478,31 +478,55 @@ def save_analysis_results(payload: dict):
 # verbindet, um die analysierten Daten zu bekommen.
 #------------------------------------------------------------------------------------
 
-def get_bluesky_analysis_results(thread_id: str | None = None):
+def get_bluesky_analysis_results(
+    thread_id: str | None = None,
+    predicted_synthetic_role: str | None = None,
+    min_toxicity_score: float | None = None,
+    min_attack_score: float | None = None,
+    login: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
+):
+    comment_query: dict = {}
     if thread_id:
-        comments = list(
-            mongo.collection("bluesky_prediction_comments_results").find(
-                {"thread_id": thread_id}, {"_id": 0}
-            )
-        )
+        comment_query["thread_id"] = thread_id
+    if predicted_synthetic_role is not None:
+        comment_query["predicted_synthetic_role"] = predicted_synthetic_role
+    if min_toxicity_score is not None:
+        comment_query["toxicity_score"] = {"$gte": min_toxicity_score}
+    if min_attack_score is not None:
+        comment_query["attack_score"] = {"$gte": min_attack_score}
+    if login:
+        comment_query["login"] = login
+
+    cursor = mongo.collection("bluesky_prediction_comments_results").find(
+        comment_query, {"_id": 0}
+    )
+    if offset:
+        cursor = cursor.skip(offset)
+    if limit is not None:
+        cursor = cursor.limit(limit)
+    comments = list(cursor)
+
+    # With no filters and no pagination this is the bulk read: return every
+    # thread and user. Otherwise scope thread/user sections to the matched
+    # comments so the three sections stay consistent.
+    is_filtered = bool(comment_query) or limit is not None or offset
+
+    if is_filtered:
+        thread_ids = {c.get("thread_id") for c in comments if c.get("thread_id") is not None}
+        logins = {c.get("login") for c in comments if c.get("login") is not None}
         threads = list(
             mongo.collection("bluesky_prediction_thread_results").find(
-                {"thread_id": thread_id}, {"_id": 0}
+                {"thread_id": {"$in": list(thread_ids)}}, {"_id": 0}
             )
         )
-
-        # Users are aggregated across threads, so keep only those that wrote a
-        # comment in this thread.
-        logins = {c.get("login") for c in comments if c.get("login") is not None}
         users = list(
             mongo.collection("bluesky_prediction_user_results").find(
                 {"login": {"$in": list(logins)}}, {"_id": 0}
             )
         )
     else:
-        comments = list(
-            mongo.collection("bluesky_prediction_comments_results").find({}, {"_id": 0})
-        )
         threads = list(
             mongo.collection("bluesky_prediction_thread_results").find({}, {"_id": 0})
         )
@@ -521,4 +545,72 @@ def get_bluesky_analysis_results(thread_id: str | None = None):
         "comments": comments,
         "threads": threads,
         "users": users,
+    }
+
+
+#------------------------------------------------------------------------------------
+# Aggregierte Zusammenfassung der Bluesky-Predictions für einen Thread (oder alle).
+# Liefert Rollenverteilung, Score-Mittelwerte und die riskantesten Kommentare,
+# damit Consumer (Moderation/Vorschläge) nicht selbst aggregieren müssen.
+#------------------------------------------------------------------------------------
+
+def _as_float(value) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def get_bluesky_analysis_summary(thread_id: str | None = None, top_n: int = 10):
+    query = {"thread_id": thread_id} if thread_id else {}
+    comments = list(
+        mongo.collection("bluesky_prediction_comments_results").find(query, {"_id": 0})
+    )
+
+    role_distribution: dict[str, int] = defaultdict(int)
+    toxicity_values = []
+    attack_values = []
+
+    for c in comments:
+        label = c.get("predicted_synthetic_role_label") or c.get("predicted_synthetic_role")
+        if label is not None:
+            role_distribution[str(label)] += 1
+
+        tox = _as_float(c.get("toxicity_score"))
+        if tox is not None:
+            toxicity_values.append(tox)
+        atk = _as_float(c.get("attack_score"))
+        if atk is not None:
+            attack_values.append(atk)
+
+    def _mean(values):
+        return sum(values) / len(values) if values else None
+
+    # Rank by attack score, then toxicity, to surface the most concerning comments.
+    high_risk_comments = sorted(
+        comments,
+        key=lambda c: (
+            _as_float(c.get("attack_score")) or 0.0,
+            _as_float(c.get("toxicity_score")) or 0.0,
+        ),
+        reverse=True,
+    )[:top_n]
+
+    last_saved = max(
+        (c.get("analysis_saved_at") for c in comments if c.get("analysis_saved_at")),
+        default=None,
+    )
+
+    logger.info(
+        "Bluesky summary: thread_id=%s, %s comments", thread_id, len(comments)
+    )
+
+    return {
+        "thread_id": thread_id,
+        "comment_count": len(comments),
+        "role_distribution": dict(role_distribution),
+        "mean_toxicity_score": _mean(toxicity_values),
+        "mean_attack_score": _mean(attack_values),
+        "high_risk_comments": high_risk_comments,
+        "analysis_saved_at": last_saved,
     }

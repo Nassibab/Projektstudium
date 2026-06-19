@@ -17,6 +17,7 @@ services:
       NEO4J_PASSWORD: password
       ANALYSE_URL: http://analyse-py:8000
       ANALYSE_R_URL: http://analyse-r:8000
+      INGESTION_URL: http://ingestion:8001
     restart: unless-stopped
 
   frontend:
