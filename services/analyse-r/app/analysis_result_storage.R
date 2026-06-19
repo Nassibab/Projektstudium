@@ -223,9 +223,13 @@ save_analysis_results_to_api <- function(comment_results, thread_results, user_r
 #---------------------------------------------------------------------------------------------------------
 # Speichert Bluesky-Predictions getrennt von Trainingsdaten
 #---------------------------------------------------------------------------------------------------------
-save_bluesky_predictions_to_api <- function(comment_results, thread_results, user_results, model_results) {
+save_bluesky_predictions_to_api <- function(comment_results, thread_results, user_results, model_results, thread_id = NULL) {
+
+  save_scope <- if (is.null(thread_id) || !nzchar(thread_id)) "full" else "thread"
 
   payload <- list(
+    bluesky_save_scope = save_scope,
+    bluesky_thread_id = thread_id,
     bluesky_prediction_comments_results = comment_results,
     bluesky_prediction_thread_results = thread_results,
     bluesky_prediction_user_results = user_results,

@@ -270,21 +270,21 @@ def get_all_comments_for_analysis():
 #  Baut den vollständigen Bluesky Analysedatensatz für R.
 #-----------------------------------------------------------------------------------------
 
-def get_bluesky_comments_for_prediction():
-    comments = list(comments_collection.find(
-        {"source_file": "bluesky"},
-        {"_id": 0}
-    ))
+def get_bluesky_comments_for_prediction(thread_id: str | None = None):
+    comments_query = {"source_file": "bluesky"}
+    threads_query = {"source_file": "bluesky"}
+    llm_query = {"source_file": "bluesky"}
 
-    threads = list(threads_collection.find(
-        {"source_file": "bluesky"},
-        {"_id": 0}
-    ))
+    if thread_id:
+        comments_query["thread_id"] = thread_id
+        threads_query["thread_id"] = thread_id
+        llm_query["thread_id"] = thread_id
 
-    llm_results = list(mongo.collection("llm_analysis_results").find(
-        {"source_file": "bluesky"},
-        {"_id": 0}
-    ))
+    comments = list(comments_collection.find(comments_query, {"_id": 0}))
+
+    threads = list(threads_collection.find(threads_query, {"_id": 0}))
+
+    llm_results = list(mongo.collection("llm_analysis_results").find(llm_query, {"_id": 0}))
 
     threads_by_key = {
         (str(t.get("source_file")), str(t.get("thread_id"))): t
@@ -352,6 +352,9 @@ def get_bluesky_comments_for_prediction():
 def save_analysis_results(payload: dict):
     db = MongoDB()
 
+    bluesky_save_scope = payload.get("bluesky_save_scope", "full")
+    bluesky_thread_id = payload.get("bluesky_thread_id")
+
     bluesky_prediction_comments_results = payload.get(
         "bluesky_prediction_comments_results", []
     )
@@ -376,29 +379,68 @@ def save_analysis_results(payload: dict):
     professor_test_model_results = payload.get(
         "professor_test_model_results", [])
 
-    if bluesky_prediction_comments_results:
-        db.collection("bluesky_prediction_comments_results").delete_many({})
-        db.collection("bluesky_prediction_comments_results").insert_many(
-            bluesky_prediction_comments_results
-        )
+    # "full"   -> wipe the whole prediction collections, then insert (default).
+    # "thread" -> only wipe rows for the given thread (and its users), then insert,
+    #             so predictions for other Bluesky posts stay intact.
+    if bluesky_save_scope == "thread" and bluesky_thread_id:
+        if bluesky_prediction_comments_results:
+            db.collection("bluesky_prediction_comments_results").delete_many(
+                {"thread_id": bluesky_thread_id}
+            )
+            db.collection("bluesky_prediction_comments_results").insert_many(
+                bluesky_prediction_comments_results
+            )
 
-    if bluesky_prediction_thread_results:
-        db.collection("bluesky_prediction_thread_results").delete_many({})
-        db.collection("bluesky_prediction_thread_results").insert_many(
-            bluesky_prediction_thread_results
-        )
+        if bluesky_prediction_thread_results:
+            db.collection("bluesky_prediction_thread_results").delete_many(
+                {"thread_id": bluesky_thread_id}
+            )
+            db.collection("bluesky_prediction_thread_results").insert_many(
+                bluesky_prediction_thread_results
+            )
 
-    if bluesky_prediction_user_results:
-        db.collection("bluesky_prediction_user_results").delete_many({})
-        db.collection("bluesky_prediction_user_results").insert_many(
-            bluesky_prediction_user_results
-        )
+        if bluesky_prediction_user_results:
+            logins = [
+                row.get("login")
+                for row in bluesky_prediction_user_results
+                if row.get("login") is not None
+            ]
+            db.collection("bluesky_prediction_user_results").delete_many(
+                {"login": {"$in": logins}}
+            )
+            db.collection("bluesky_prediction_user_results").insert_many(
+                bluesky_prediction_user_results
+            )
 
-    if bluesky_prediction_model_results:
-        db.collection("bluesky_prediction_model_results").delete_many({})
-        db.collection("bluesky_prediction_model_results").insert_many(
-            bluesky_prediction_model_results
-        )
+        # Keep model run history on thread runs (append instead of wipe).
+        if bluesky_prediction_model_results:
+            db.collection("bluesky_prediction_model_results").insert_many(
+                bluesky_prediction_model_results
+            )
+    else:
+        if bluesky_prediction_comments_results:
+            db.collection("bluesky_prediction_comments_results").delete_many({})
+            db.collection("bluesky_prediction_comments_results").insert_many(
+                bluesky_prediction_comments_results
+            )
+
+        if bluesky_prediction_thread_results:
+            db.collection("bluesky_prediction_thread_results").delete_many({})
+            db.collection("bluesky_prediction_thread_results").insert_many(
+                bluesky_prediction_thread_results
+            )
+
+        if bluesky_prediction_user_results:
+            db.collection("bluesky_prediction_user_results").delete_many({})
+            db.collection("bluesky_prediction_user_results").insert_many(
+                bluesky_prediction_user_results
+            )
+
+        if bluesky_prediction_model_results:
+            db.collection("bluesky_prediction_model_results").delete_many({})
+            db.collection("bluesky_prediction_model_results").insert_many(
+                bluesky_prediction_model_results
+            )
         
     if professor_test_comment_results:
         db.collection("professor_test_comment_results").delete_many({})
@@ -436,16 +478,37 @@ def save_analysis_results(payload: dict):
 # verbindet, um die analysierten Daten zu bekommen.
 #------------------------------------------------------------------------------------
 
-def get_bluesky_analysis_results():
-    comments = list(
-        mongo.collection("bluesky_prediction_comments_results").find({}, {"_id": 0})
-    )
-    threads = list(
-        mongo.collection("bluesky_prediction_thread_results").find({}, {"_id": 0})
-    )
-    users = list(
-        mongo.collection("bluesky_prediction_user_results").find({}, {"_id": 0})
-    )
+def get_bluesky_analysis_results(thread_id: str | None = None):
+    if thread_id:
+        comments = list(
+            mongo.collection("bluesky_prediction_comments_results").find(
+                {"thread_id": thread_id}, {"_id": 0}
+            )
+        )
+        threads = list(
+            mongo.collection("bluesky_prediction_thread_results").find(
+                {"thread_id": thread_id}, {"_id": 0}
+            )
+        )
+
+        # Users are aggregated across threads, so keep only those that wrote a
+        # comment in this thread.
+        logins = {c.get("login") for c in comments if c.get("login") is not None}
+        users = list(
+            mongo.collection("bluesky_prediction_user_results").find(
+                {"login": {"$in": list(logins)}}, {"_id": 0}
+            )
+        )
+    else:
+        comments = list(
+            mongo.collection("bluesky_prediction_comments_results").find({}, {"_id": 0})
+        )
+        threads = list(
+            mongo.collection("bluesky_prediction_thread_results").find({}, {"_id": 0})
+        )
+        users = list(
+            mongo.collection("bluesky_prediction_user_results").find({}, {"_id": 0})
+        )
 
     logger.info(
         "Bluesky results read: %s comments, %s threads, %s users",

@@ -77,9 +77,13 @@ function() {
 
 
 #* Predict Bluesky synthetic roles as JSON
+#* @param thread_id optional Bluesky post id; if omitted, predicts all Bluesky data
 #* @get /predict-bluesky
-function() {
-  predict_bluesky_synthetic_roles()
+function(thread_id = NULL) {
+  if (!is.null(thread_id) && !nzchar(thread_id)) {
+    thread_id <- NULL
+  }
+  predict_bluesky_synthetic_roles(thread_id = thread_id)
 }
 
 

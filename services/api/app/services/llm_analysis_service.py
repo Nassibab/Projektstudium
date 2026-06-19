@@ -114,3 +114,30 @@ def analyze_professor_with_llm_service() -> dict:
 # ------------------------------------------------------------------------------
 def analyze_bluesky_with_llm_service() -> dict:
     return analyze_platform_with_llm_service("bluesky")
+
+
+# ------------------------------------------------------------------------------
+# Erzeugt LLM-Features nur für genau einen Bluesky-Thread (thread_id).
+# Wird für die thread-spezifische Analyse über /pipeline/bluesky/run genutzt.
+# ------------------------------------------------------------------------------
+def analyze_bluesky_thread_with_llm(thread_id: str) -> dict:
+    threads = get_thread_keys_for_llm_by_platform("bluesky")
+    match = next((t for t in threads if t.get("thread_id") == thread_id), None)
+
+    if match is None:
+        return {
+            "status": "error",
+            "message": f"thread not found: {thread_id}",
+        }
+
+    result = analyze_one_thread_with_llm(match)
+
+    return {
+        "status": "success",
+        "source_platform": "bluesky",
+        "batch_size": BATCH_SIZE,
+        "threads_processed": result["threads"],
+        "comments_processed": result["comments"],
+        "results_count": result["results"],
+        "inserted_count": result["inserted"],
+    }

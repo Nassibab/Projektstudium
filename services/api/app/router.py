@@ -202,14 +202,17 @@ def get_all_analysis_comments():
 # ------------------------------------------------------------------------------ 
 
 @router.get("/analysis/bluesky/prediction-data")
-def bluesky_prediction_data():
-    return get_bluesky_comments_for_prediction()
+def bluesky_prediction_data(thread_id: str | None = Query(default=None)):
+    return get_bluesky_comments_for_prediction(thread_id=thread_id)
 
 # ------------------------------------------------------------------------------
 # Ergebnisse, die von R-Service an die API zurückgegeben werden
 # ------------------------------------------------------------------------------
 
 class AnalysisResultsPayload(BaseModel):
+
+    bluesky_save_scope: str = "full"
+    bluesky_thread_id: str | None = None
 
     bluesky_prediction_comments_results: list[dict[str, Any]] = []
     bluesky_prediction_thread_results: list[dict[str, Any]] = []
@@ -234,17 +237,21 @@ def save_results(payload: AnalysisResultsPayload):
 # Verbindet Ingestion und Analyse: erzeugt LLM-Features und startet danach die
 # R-Prediction. Manueller Aufruf (Button/curl), kein Scheduler.
 # ------------------------------------------------------------------------------
+class BlueskyRunRequest(BaseModel):
+    thread_id: str | None = None
+
+
 @router.post("/pipeline/bluesky/run")
-def run_bluesky_pipeline():
-    return run_bluesky_analysis()
+def run_bluesky_pipeline(body: BlueskyRunRequest = BlueskyRunRequest()):
+    return run_bluesky_analysis(thread_id=body.thread_id)
 
 
 # ------------------------------------------------------------------------------
 # Read-Endpoint: liefert die fertigen Bluesky-Analyseergebnisse aus MongoDB.
 # ------------------------------------------------------------------------------
 @router.get("/analysis/bluesky/results")
-def read_bluesky_analysis_results():
-    return get_bluesky_analysis_results()
+def read_bluesky_analysis_results(thread_id: str | None = Query(default=None)):
+    return get_bluesky_analysis_results(thread_id=thread_id)
 
 
 @router.get("/demo-data")

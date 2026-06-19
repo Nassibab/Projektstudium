@@ -188,8 +188,8 @@ build_bluesky_result_documents <- function(bluesky_data, pred, predicted_role) {
 # Lädt gespeichertes Professor-Modell und predicted Bluesky.
 # Trainiert NICHT neu.
 # ----------------------------------------------------------------------------------
-predict_bluesky_synthetic_roles <- function() {
-  data <- load_analysis_bluesky ()
+predict_bluesky_synthetic_roles <- function(thread_id = NULL) {
+  data <- load_analysis_bluesky(thread_id)
 
   if (!file.exists(MODEL_PATH)) {
     stop("Kein gespeichertes Modell gefunden. Bitte zuerst /train-full-model ausführen.")
@@ -267,7 +267,8 @@ predict_bluesky_synthetic_roles <- function() {
     comment_results = documents$comment_results,
     thread_results = documents$thread_results,
     user_results = documents$user_results,
-    model_results = documents$model_results
+    model_results = documents$model_results,
+    thread_id = thread_id
   )
 
   list(
