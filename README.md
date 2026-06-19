@@ -161,9 +161,9 @@ docker-compose up -d --build
 
 Gestartete Container:
 
-* `groupproject_api`
-* `groupproject_mongodb`
-* `groupproject_neo4j`
+* `psb1-127-api-1`
+* `psb1-127-mongodb-1`
+* `psb1-127-neo4j-1`
 
 ---
 
@@ -172,7 +172,7 @@ Gestartete Container:
 ### 3.1 Verbindung
 
 ```bash
-docker exec -it groupproject_mongodb mongosh
+docker compose exec mongodb mongosh
 ```
 
 ```js

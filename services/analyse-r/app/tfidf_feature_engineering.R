@@ -68,30 +68,31 @@ create_tfidf_features <- function(train_data, test_data) {
   test_row_sums <- Matrix::rowSums(test_counts)
   test_row_sums[test_row_sums == 0] <- 1
 
-  train_tf <- train_counts / train_row_sums
-  test_tf <- test_counts / test_row_sums
+  # sweep() keeps sparse dgCMatrix type; plain / and t() can drop matrix class
+  train_tf <- sweep(train_counts, 1, train_row_sums, FUN = "/")
+  test_tf <- sweep(test_counts, 1, test_row_sums, FUN = "/")
 
   n_train_docs <- nrow(train_counts)
   df_train <- Matrix::colSums(train_counts > 0)
   idf_train <- log((1 + n_train_docs) / (1 + df_train)) + 1
 
-  train_tfidf <- t(t(train_tf) * idf_train)
-  test_tfidf <- t(t(test_tf) * idf_train)
-
-  train_tfidf_df <- as.data.frame(as.matrix(train_tfidf))
-  test_tfidf_df <- as.data.frame(as.matrix(test_tfidf))
+  train_tfidf <- sweep(train_tf, 2, idf_train, FUN = "*")
+  test_tfidf <- sweep(test_tf, 2, idf_train, FUN = "*")
 
   tfidf_names <- paste0("tfidf_", make.names(quanteda::featnames(dfm_train), unique = TRUE))
+  colnames(train_tfidf) <- tfidf_names
+  colnames(test_tfidf) <- tfidf_names
 
-  names(train_tfidf_df) <- tfidf_names
-  names(test_tfidf_df) <- tfidf_names
+  rm(train_tf, train_counts, dfm_train, tokens_train, train_text, train_subject)
+  rm(test_tf, test_counts, dfm_test, tokens_test, test_text, test_subject)
+  gc(full = TRUE)
 
-  stopifnot(identical(names(train_tfidf_df), names(test_tfidf_df)))
+  stopifnot(identical(colnames(train_tfidf), colnames(test_tfidf)))
 
   list(
-    train_tfidf = train_tfidf_df,
-    test_tfidf = test_tfidf_df,
-    n_tfidf_features = ncol(train_tfidf_df),
+    train_tfidf = train_tfidf,
+    test_tfidf = test_tfidf,
+    n_tfidf_features = ncol(train_tfidf),
     tfidf_time = Sys.time() - start_time
   )
 }

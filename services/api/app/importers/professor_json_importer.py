@@ -29,7 +29,11 @@ def import_json():
         with open(file_path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
-        for thread in data.get("threads", []):
+        if not isinstance(data, dict) or "threads" not in data:
+            print(f"Überspringe (kein Thread-Format): {filename}")
+            continue
+
+        for thread in data["threads"]:
             thread_id = thread["thread_id"]
 
             all_threads.append(

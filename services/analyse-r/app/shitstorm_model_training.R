@@ -19,17 +19,23 @@ prepare_model_matrices <- function(train_data, test_data) {
   train_model_data <- train_data[, c("synthetic_role", STRUCTURE_FEATURES), drop = FALSE]
   test_model_data <- test_data[, c("synthetic_role", STRUCTURE_FEATURES), drop = FALSE]
 
-  train_model_data <- cbind(train_model_data, tfidf_result$train_tfidf)
-  test_model_data <- cbind(test_model_data, tfidf_result$test_tfidf)
-
   train_model_data <- handle_missing_values(train_model_data)
   test_model_data <- handle_missing_values(test_model_data)
   test_model_data <- align_factor_levels(train_model_data, test_model_data)
 
+  train_structure <- train_model_data[, STRUCTURE_FEATURES, drop = FALSE]
+  test_structure <- test_model_data[, STRUCTURE_FEATURES, drop = FALSE]
+
+  train_x <- combine_structure_and_tfidf(train_structure, tfidf_result$train_tfidf)
+  test_x <- combine_structure_and_tfidf(test_structure, tfidf_result$test_tfidf)
+
   list(
     train_model_data = train_model_data,
     test_model_data = test_model_data,
-    tfidf_result = tfidf_result
+    train_x = train_x,
+    test_x = test_x,
+    tfidf_result = tfidf_result,
+    feature_cols = colnames(train_x)
   )
 }
 
@@ -46,44 +52,56 @@ train_full_synthetic_role_model <- function(data) {
   start_total <- Sys.time()
 
   full_data <- prepare_full_training_data(data)
+  rm(data)
+  gc(full = TRUE)
 
   set.seed(SEED_VALUE)
   train_ids <- sample(seq_len(nrow(full_data)), size = floor(TRAIN_RATIO * nrow(full_data)))
 
   train_data <- full_data[train_ids, ]
   test_data <- full_data[-train_ids, ]
+  total_rows <- nrow(full_data)
+  rm(full_data)
+  gc(full = TRUE)
 
   matrices <- prepare_model_matrices(train_data, test_data)
   train_model_data <- matrices$train_model_data
   test_model_data <- matrices$test_model_data
+  train_x <- matrices$train_x
+  test_x <- matrices$test_x
+  feature_cols <- matrices$feature_cols
   tfidf_result <- matrices$tfidf_result
+  tfidf_time_secs <- as.numeric(tfidf_result$tfidf_time, units = "secs")
+  n_tfidf_features <- tfidf_result$n_tfidf_features
+  rm(matrices, tfidf_result)
+  gc(full = TRUE)
 
   test_truth <- test_model_data$synthetic_role
   test_ids <- if ("id" %in% names(test_data)) test_data$id else seq_len(nrow(test_data))
 
-  task <- TaskClassif$new(
-    id = "full_synthetic_role_model",
-    backend = train_model_data,
-    target = "synthetic_role"
-  )
-
-  learner <- lrn(
-    "classif.ranger",
-    predict_type = "prob",
+  start_train <- Sys.time()
+  rf_model <- ranger::ranger(
+    x = train_x,
+    y = train_model_data$synthetic_role,
+    probability = TRUE,
     importance = "impurity",
     num.threads = RANGER_NUM_THREADS
   )
-
-  start_train <- Sys.time()
-  learner$train(task)
   training_time <- Sys.time() - start_train
 
-  feature_cols <- setdiff(names(train_model_data), "synthetic_role")
-  test_x <- test_model_data[, feature_cols, drop = FALSE]
-  test_x <- align_factor_levels(train_model_data, test_x)
-
   start_predict <- Sys.time()
-  pred <- learner$predict_newdata(test_x)
+  pred_prob <- predict(rf_model, data = test_x)$predictions
+  pred_response <- predict(rf_model, data = test_x, type = "response")$predictions
+
+  if (is.matrix(pred_response)) {
+    pred_response <- colnames(pred_prob)[max.col(pred_response, ties.method = "first")]
+  }
+
+  pred_response <- factor(as.character(pred_response), levels = levels(test_truth))
+  pred <- list(
+    response = pred_response,
+    prob = as.data.frame(pred_prob)
+  )
   prediction_time <- Sys.time() - start_predict
   prediction_time_per_row <- as.numeric(prediction_time, units = "secs") / nrow(test_x)
 
@@ -95,7 +113,7 @@ train_full_synthetic_role_model <- function(data) {
   test_confusion <- table(Truth = test_truth, Prediction = pred$response)
   class_accuracy <- diag(test_confusion) / rowSums(test_confusion)
 
-  feature_importance <- learner$importance()
+  feature_importance <- rf_model$variable.importance
   feature_importance_sorted <- sort(feature_importance, decreasing = TRUE)
   feature_importance_df <- data.frame(
     feature = names(feature_importance_sorted),
@@ -129,9 +147,9 @@ train_full_synthetic_role_model <- function(data) {
     lookback_features_used = FALSE,
     feature_importance_used = TRUE,
     ranger_num_threads = RANGER_NUM_THREADS,
-    n_features_total = ncol(train_model_data) - 1,
-    n_tfidf_features = sum(grepl("^tfidf_", names(train_model_data))),
-    oob_brier = learner$model$prediction.error,
+    n_features_total = length(feature_cols),
+    n_tfidf_features = n_tfidf_features,
+    oob_brier = rf_model$prediction.error,
     test_accuracy = accuracy,
     test_classification_error = classification_error,
     class_1_root = as.numeric(class_accuracy["1"]),
@@ -142,7 +160,7 @@ train_full_synthetic_role_model <- function(data) {
     class_6_target_response = as.numeric(class_accuracy["6"]),
     class_7_deescalation = as.numeric(class_accuracy["7"]),
     total_time_min = as.numeric(total_time, units = "mins"),
-    tfidf_time_min = as.numeric(tfidf_result$tfidf_time, units = "mins"),
+    tfidf_time_min = tfidf_time_secs / 60,
     model_training_time_min = as.numeric(training_time, units = "mins"),
     prediction_time_min = as.numeric(prediction_time, units = "mins"),
     prediction_time_per_row_sec = prediction_time_per_row
@@ -181,21 +199,21 @@ if (!dir.exists(MODEL_DIR)) {
   dir.create(MODEL_DIR, recursive = TRUE)
 }
 
-model_bundle <- list(
-  learner = learner,
+model_bundle <- slim_model_bundle(list(
+  learner = rf_model,
   train_data_for_tfidf = train_data,
   train_model_template = train_model_data,
   feature_cols = feature_cols,
   created_at = as.character(Sys.time()),
   model_name = MODEL_NAME,
   accuracy = accuracy
-)
+))
 
 saveRDS(model_bundle, MODEL_PATH)
 
 
   list(
-    learner = learner,
+    learner = rf_model,
     accuracy = accuracy,
     classification_error = classification_error,
     confusion = confusion,
@@ -205,12 +223,12 @@ saveRDS(model_bundle, MODEL_PATH)
     top_non_tfidf_features = head(non_tfidf_importance_df, 30),
     results_row = results_row,
     thread_feature_preview = head(train_model_data[, intersect(STRUCTURE_FEATURES, names(train_model_data)), drop = FALSE], 20),
-    total_rows = nrow(full_data),
+    total_rows = total_rows,
     train_rows = nrow(train_model_data),
     test_rows = nrow(test_model_data),
-    n_features_total = ncol(train_model_data) - 1,
-    n_tfidf_features = tfidf_result$n_tfidf_features,
-    tfidf_time = as.numeric(tfidf_result$tfidf_time, units = "secs"),
+    n_features_total = length(feature_cols),
+    n_tfidf_features = n_tfidf_features,
+    tfidf_time = tfidf_time_secs,
     training_time = as.numeric(training_time, units = "secs"),
     prediction_time = as.numeric(prediction_time, units = "secs"),
     prediction_time_per_row_sec = prediction_time_per_row,

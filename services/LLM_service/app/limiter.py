@@ -4,7 +4,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 # Per-IP limit for LLM routes. slowapi format: "<count>/<period>" (second, minute, hour, day).
-DEFAULT_RATE_LIMIT = "10/minute"
+DEFAULT_RATE_LIMIT = "50/minute"
 
 
 def get_rate_limit() -> str:
