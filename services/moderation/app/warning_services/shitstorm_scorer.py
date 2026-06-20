@@ -8,23 +8,10 @@ class ShitstormScorer:
         self.history_window_size = history_window_size
         self.cusum_values = defaultdict(float)
 
-        # Metriken werden fachlich gruppiert.
-        # Dadurch wird später nicht jede einzelne Variable isoliert bewertet,
-        # sondern jede Eskalationsdimension.
         self.metric_groups = {
-            "activity": [
-                "comment_count",
-                "unique_users"
-            ],
-            "aggression": [
-                "attack_ratio",
-                "attack_score_mean",
-                "insult_ratio"
-            ],
-            "toxicity": [
-                "toxic_ratio",
-                "toxicity_score_mean"
-            ],
+            "activity": ["comment_count", "unique_users"],
+            "aggression": ["attack_ratio", "attack_score_mean", "insult_ratio"],
+            "toxicity": ["toxic_ratio", "toxicity_score_mean"],
             "personalization": [
                 "direct_address_mean",
                 "target_recently_attacked_ratio",
@@ -37,23 +24,18 @@ class ShitstormScorer:
         }
 
     def safe_get(self, metrics, key, default=0.0):
-        value = metrics.get(key, default)
-
         try:
+            value = metrics.get(key, default)
             return default if value is None else float(value)
         except (ValueError, TypeError):
             return default
 
     def get_previous_values(self, thread_id, metric_name):
-        history = self.thread_history[thread_id]
-
         return [
             self.safe_get(h, metric_name)
-            for h in history[-self.history_window_size:]
+            for h in self.thread_history[thread_id][-self.history_window_size:]
         ]
 
-    # Rolling Z-Score:
-    # Vergleicht den aktuellen Wert mit den vorherigen Fenstern desselben Threads.
     def calculate_z_score(self, thread_id, metric_name, current_value):
         previous_values = self.get_previous_values(thread_id, metric_name)
 
@@ -62,20 +44,15 @@ class ShitstormScorer:
 
         mean_value = statistics.mean(previous_values)
         std_value = statistics.pstdev(previous_values)
-    
-        # Wenn keine Streuung vorhanden ist: 
+
         if std_value == 0:
             return 3.0 if current_value > mean_value else 0.0
 
         return (current_value - mean_value) / std_value
 
-    # CUSUM: Erkennt schleichende Eskalationen.
-    # Anders als der Z-Score erkennt CUSUM nicht nur einzelne große Ausreißer,
-    # sondern summiert mehrere kleine positive Abweichungen über Zeit auf.
     def calculate_cusum(self, thread_id, metric_name, current_value):
         previous_values = self.get_previous_values(thread_id, metric_name)
-        
-        # mindestens 3 Vergleichsfenster nötig.
+
         if len(previous_values) < 3:
             return 0.0
 
@@ -107,7 +84,15 @@ class ShitstormScorer:
             return False
 
         return values[-1] > values[-2] > values[-3]
-        
+
+    def scale_z_to_score(self, z_score):
+        """
+        Converts z-score to 0-100.
+        z <= 0 -> 0
+        z >= 3 -> 100
+        """
+        return round(min(max(z_score, 0), 3) / 3 * 100, 2)
+
     """
     Prüft eine einzelne Metrik mit drei statistischen Verfahren:
     - Rolling Z-Score
@@ -115,19 +100,15 @@ class ShitstormScorer:
     - Trendanalyse
     """
     def analyze_metric(self, thread_id, metric_name, current_value):
-
         z_score = self.calculate_z_score(thread_id, metric_name, current_value)
         cusum = self.calculate_cusum(thread_id, metric_name, current_value)
-        trend_detected = self.calculate_trend_detected(
-            thread_id,
-            metric_name,
-            current_value
-        )
+        trend_detected = self.calculate_trend_detected(thread_id, metric_name, current_value)
+
+        metric_score = self.scale_z_to_score(z_score)
 
         return {
             "current_value": current_value,
             "z_score": round(z_score, 3),
-            "z_signal": z_score >= 2,
             "cusum": round(cusum, 3),
             "cusum_signal": cusum >= 3,
             "trend_signal": trend_detected
@@ -143,35 +124,38 @@ class ShitstormScorer:
     ein statistisches Signal auslöst.
     """
     def analyze_dimension(self, thread_id, metrics, dimension_name, metric_names):
-
-
         metric_results = {}
-        triggered_metrics = []
 
         for metric_name in metric_names:
             current_value = self.safe_get(metrics, metric_name)
-
-            result = self.analyze_metric(
+            metric_results[metric_name] = self.analyze_metric(
                 thread_id,
                 metric_name,
                 current_value
             )
 
-            metric_results[metric_name] = result
+        metric_scores = [
+            result["metric_score"]
+            for result in metric_results.values()
+        ]
 
-            if (
-                result["z_signal"]
-                or result["cusum_signal"]
-                or result["trend_signal"]
-            ):
-                triggered_metrics.append(metric_name)
+        dimension_score = (
+            statistics.mean(metric_scores)
+            if metric_scores
+            else 0.0
+        )
 
-        dimension_alert = len(triggered_metrics) > 0
+        dimension_alert = any(
+            result["z_score"] >= 2
+            or result["cusum"] >= 3
+            or result["trend_signal"]
+            for result in metric_results.values()
+        )
 
         return {
             "dimension": dimension_name,
+            "dimension_score": round(dimension_score, 2),
             "alert": dimension_alert,
-            "triggered_metrics": triggered_metrics,
             "metric_results": metric_results
         }
        
@@ -181,8 +165,6 @@ class ShitstormScorer:
     sondern mehrere Eskalationsdimensionen.
     """
     def calculate_final_score(self, thread_id, metrics):
-       
-
         dimension_results = {}
 
         for dimension_name, metric_names in self.metric_groups.items():
@@ -193,37 +175,34 @@ class ShitstormScorer:
                 metric_names
             )
 
-        alerted_dimensions = [
-            name
+        dimension_scores = {
+            name: result["dimension_score"]
             for name, result in dimension_results.items()
-            if result["alert"]
-        ]
+        }
 
-        # Score = Anteil auffälliger Dimensionen.
-        # Keine frei gewichteten Einzelvariablen.
-        final_score = (
-            len(alerted_dimensions) / len(self.metric_groups)
-        ) * 100
-
-        warning_level = self.get_warning_level_from_dimensions(
-            dimension_results
+        # Finales Shitstorm-Barometer: Durchschnitt der Eskalationsdimensionen
+        shitstorm_barometer = (
+            statistics.mean(dimension_scores.values())
+            if dimension_scores
+            else 0.0
         )
 
-        metrics["final_shitstorm_score"] = round(final_score, 2)
-        metrics["alerted_dimensions"] = alerted_dimensions
+        warning_level = self.get_warning_level_from_dimensions(dimension_results)
+
+        metrics["shitstorm_barometer"] = round(shitstorm_barometer, 2)
+        metrics["warning_level"] = warning_level
+        metrics["dimension_scores"] = dimension_scores
 
         self.thread_history[thread_id].append(metrics)
 
         return {
             "thread_id": thread_id,
-            "final_shitstorm_score": round(final_score, 2),
+            "shitstorm_barometer": round(shitstorm_barometer, 2),
             "warning_level": warning_level,
-            "alerted_dimension_count": len(alerted_dimensions),
-            "max_dimensions": len(self.metric_groups),
-            "alerted_dimensions": alerted_dimensions,
+            "dimension_scores": dimension_scores,
             "dimension_results": dimension_results,
-            "recent_scores": [
-                h.get("final_shitstorm_score", 0)
+            "recent_barometer_values": [
+                h.get("shitstorm_barometer", 0)
                 for h in self.thread_history[thread_id][-self.history_window_size:]
             ]
         }
@@ -234,8 +213,6 @@ class ShitstormScorer:
         z. B. nur Aktivität, sofort eine starke Warnung auslöst.
         """
     def get_warning_level_from_dimensions(self, dimension_results):
-       
-
         alerted = [
             name
             for name, result in dimension_results.items()

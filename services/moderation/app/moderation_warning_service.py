@@ -35,7 +35,8 @@ class ModerationWarningService:
         score_result = self.scorer.calculate_final_score(thread_id, metrics) 
 
         countermeasure_result = self.countermeasures.decide_actions(
-            shitstorm_score=score_result["final_shitstorm_score"],
+            #shitstorm_score=score_result["final_shitstorm_score"],
+            score_result["shitstorm_barometer"],
             warning_level=score_result["warning_level"]
         )
 
@@ -45,7 +46,8 @@ class ModerationWarningService:
         should_generate_counter_speech = (
             self.counter_speech_selector.should_generate_counter_speech(
                 comment=comment,
-                shitstorm_score=score_result["final_shitstorm_score"],
+                #shitstorm_score=score_result["final_shitstorm_score"],
+                shitstorm_score=score_result["shitstorm_barometer"],
                 warning_level=score_result["warning_level"]
             )
         )
