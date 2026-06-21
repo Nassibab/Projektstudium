@@ -1,3 +1,4 @@
+import requests
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, BackgroundTasks, Body
 from pydantic import BaseModel
@@ -30,18 +31,56 @@ from app.services.mongodb_graph_sync import (
     reset_mongo_sync_status_if_missing_in_neo4j,
 )
 
+from app.db.mongo import MongoDB
+
 router = APIRouter()
 
-# --- Background Worker Function ---
-def save_to_mongodb_async(payload: dict):
-    # TODO: Implement the actual MongoDB insert when the collection logic is ready
-    print(f"Background Task: Würde Kommentar in Mongo speichern -> {payload.get('comment', {}).get('id')}")
+
+try:
+    mongo_db = MongoDB()
+    comments_collection = mongo_db.collection("comments")
+except Exception as e:
+    print(f"Warnung: MongoDB konnte beim Start nicht verbunden werden: {e}")
+    comments_collection = None
+
+def save_to_mongodb_background(payload: dict):
+    """Speichert den aktuellen Zwischenstand (Kommentar + bisherige Scores) in der DB"""
+    if comments_collection is None:
+        print("Background Task: MongoDB ist nicht verbunden. Überspringe Speichern.")
+        return
+
+    comment_data = payload.get("comment", {})
+    if comment_data and comment_data.get("id"):
+        try:
+            comments_collection.update_one(
+                {"comment_id": comment_data["id"]}, 
+                {"$set": comment_data}, 
+                upsert=True
+            )
+            print(f"In MongoDB gespeichert: ID {comment_data['id']}")
+        except Exception as e:
+            print(f"Fehler bei MongoDB Speicherung: {e}")
+
+def forward_to_analyse_r(payload: dict):
+    """Gibt die Daten sofort an R weiter"""
+    try:
+        requests.post("http://analyse-r:8000/analyze-event", json=payload, timeout=10)
+        print("➡️ An Analyse-R weitergeleitet")
+    except Exception as e:
+        print(f"Analyse-R noch nicht erreichbar (ignoriert): {e}")
+
+def forward_to_moderation(payload: dict):
+    """Gibt die Daten an die Moderation weiter"""
+    try:
+        requests.post("http://moderation:8000/moderate", json=payload, timeout=10)
+        print("An Moderation weitergeleitet")
+    except Exception as e:
+        print(f"Moderation noch nicht erreichbar (ignoriert): {e}")
 
 
 @router.get("/")
 def read_root():
     return {"message": "API is running"}
-
 
 @router.post("/import/professor")
 def import_professor_data_into_MongoDB():
@@ -51,42 +90,69 @@ def import_professor_data_into_MongoDB():
         "message": "Professor data imported"
     }
 
-
 @router.post("/sync/graph")
 def sync_MongoDB_NEO4J():
     return sync_all_threads_to_graph()
-
 
 @router.get("/report/threads")
 def report_threads_in_MongoDB_and_NEO4J():
     return get_thread_report()
 
-
 @router.post("/sync/reset-missing-neo4j")
 def reset_missing_neo4j_sync_status():
     return reset_mongo_sync_status_if_missing_in_neo4j()
 
-
 @router.get("/analysis/comments")
 def get_analysis_comments():
     return get_comments_for_analysis()
-
 
 @router.get("/demo/stream")
 def stream_demo_updates():
     return StreamingResponse(iter_thread_updates(), media_type="text/event-stream")
 
 
+@router.post("/events/llm-labeled")
+def event_llm_labeled(payload: dict, background_tasks: BackgroundTasks):
+    """
+    SCHRITT 1: Wird vom LLM (analyse-py) aufgerufen, sobald Labels fertig sind.
+    """
+    # 1. UI sofort updaten (User sieht das Event live)
+    update_cached_demo_data(payload)
+    publish_thread_update(payload)
+    
+    # 2. Zwischenstand in DB sichern
+    background_tasks.add_task(save_to_mongodb_background, payload)
+    
+    # 3. An R (Analyse) weiterleiten
+    background_tasks.add_task(forward_to_analyse_r, payload)
+    
+    return {"status": "ok", "message": "Broadcasted to UI, DB, and R"}
+
+
+@router.post("/events/analysis-completed")
+def event_analysis_completed(payload: dict, background_tasks: BackgroundTasks):
+    """
+    SCHRITT 2: Wird von R (analyse-r) aufgerufen, sobald Scores berechnet sind.
+    """
+    update_cached_demo_data(payload)
+    publish_thread_update(payload)
+    
+    background_tasks.add_task(save_to_mongodb_background, payload)
+    
+    background_tasks.add_task(forward_to_moderation, payload)
+    
+    return {"status": "ok", "message": "Broadcasted to UI, DB, and Moderation"}
+
+
 @router.post("/demo/publish")
 def publish_demo_update(
     background_tasks: BackgroundTasks, 
-    payload: Optional[dict] = Body(None)  # Macht den Body optional
+    payload: Optional[dict] = Body(None)
 ):
     """
     Nimmt einen JSON-Payload entgegen. 
     Wenn keiner gesendet wird, werden Dummy-Daten zum Testen generiert.
     """
-    # Fallback für Tests, wenn der Endpunkt ohne Daten aufgerufen wird:
     if not payload:
         payload = {
             "type": "comment_added",
@@ -109,14 +175,11 @@ def publish_demo_update(
             },
         }
 
-    # 1. Update in Redis
     update_cached_demo_data(payload)
 
-    # 2. Broadcast an alle SSE-Abonnenten
     subscribers = publish_thread_update(payload)
 
-    # 3. Hintergrund-Task für MongoDB starten
-    background_tasks.add_task(save_to_mongodb_async, payload)
+    background_tasks.add_task(save_to_mongodb_background, payload)
 
     return {
         "status": "ok",
