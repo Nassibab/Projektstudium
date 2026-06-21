@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
+from typing import Optional
+from fastapi import APIRouter, HTTPException, Query, BackgroundTasks, Body
 from pydantic import BaseModel
 from typing import Any
 from fastapi.responses import StreamingResponse
@@ -34,10 +35,6 @@ router = APIRouter()
 # --- Background Worker Function ---
 def save_to_mongodb_async(payload: dict):
     # TODO: Implement the actual MongoDB insert when the collection logic is ready
-    # from app.db.mongo import MongoDB
-    # mongo = MongoDB()
-    # comments_collection = mongo.collection("comments")
-    # comments_collection.insert_one(payload.get("comment"))
     print(f"Background Task: Würde Kommentar in Mongo speichern -> {payload.get('comment', {}).get('id')}")
 
 
@@ -49,7 +46,6 @@ def read_root():
 @router.post("/import/professor")
 def import_professor_data_into_MongoDB():
     import_json()
-
     return {
         "status": "success",
         "message": "Professor data imported"
@@ -82,13 +78,37 @@ def stream_demo_updates():
 
 
 @router.post("/demo/publish")
-def publish_demo_update(payload: dict, background_tasks: BackgroundTasks):
+def publish_demo_update(
+    background_tasks: BackgroundTasks, 
+    payload: Optional[dict] = Body(None)  # Macht den Body optional
+):
     """
-    Nimmt einen JSON-Payload entgegen (z.B. vom Analyse-Service).
-    1. Aktualisiert den Redis-Cache sofort.
-    2. Sendet das Event via SSE an das Frontend.
-    3. Reiht das Speichern in die MongoDB als Hintergrundaufgabe ein.
+    Nimmt einen JSON-Payload entgegen. 
+    Wenn keiner gesendet wird, werden Dummy-Daten zum Testen generiert.
     """
+    # Fallback für Tests, wenn der Endpunkt ohne Daten aufgerufen wird:
+    if not payload:
+        payload = {
+            "type": "comment_added",
+            "threadId": 1,
+            "comment": {
+                "id": 999,
+                "author": "Redis Demo",
+                "time": "2026-06-10T12:00:00Z",
+                "text": "Dieser Kommentar wurde über Redis an die offene Dashboard-Sitzung gesendet.",
+                "moderation": "Demo-Event aus dem Redis-SSE-Pfad.",
+                "kpis": [
+                    {"name": "Toxizität", "value": 0.18},
+                    {"name": "Respekt", "value": 0.22},
+                    {"name": "Relevanz", "value": 0.30},
+                    {"name": "Klarheit", "value": 0.25},
+                    {"name": "Emotionalität", "value": 0.20},
+                    {"name": "Sachlichkeit", "value": 0.28},
+                ],
+                "score": 0.24,
+            },
+        }
+
     # 1. Update in Redis
     update_cached_demo_data(payload)
 
