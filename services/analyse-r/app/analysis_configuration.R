@@ -107,10 +107,10 @@ STRUCTURE_FEATURES <- c(
 # Wir wählen im API-Code zwar aktiv STRUCTURE_FEATURES aus, diese Liste dokumentiert
 # die gleiche Bereinigungslogik wie in der vollständigen Analyse-Datei.
 DROP_COLUMNS_AFTER_TFIDF <- c(
-  "text", "subject", "name",
+  "text", "subject", "name", "comment_id",
   "thread_id", "login", "parent", "target_login",
   "synthetic", "label_shitstorm", "toxicity_level", "scenario_type", "comment_scenario_type",
-  "thread_title", "created", "sort_timestamp", "irony_binary_previous",
+  "thread_title", "created_at", "sort_timestamp", "irony_binary_previous",
   "is_attacking_binary_previous", "synthetic_role_original",
   "has_counter_speech_marker", "counter_speech_marker_count", "boundary_marker_count",
   "thread_is_long_numeric", "has_tone_criticism", "tone_criticism_count",
@@ -127,7 +127,7 @@ DROP_COLUMNS_AFTER_TFIDF <- c(
 FACTOR_COLUMNS <- c("synthetic_role", "is_attacking", "is_long_thread")
 
 INTEGER_COLUMNS <- c(
-  "id", "parent", "irony", "swearword_count", "negative_word_count",
+  "parent", "irony", "swearword_count", "negative_word_count",
   "insult_count", "attack_score", "toxicity_score", "direct_address_count",
   "imperative_count", "accusation_marker_count", "mockery_marker_count",
   "login_count", "frequency_group", "thread_position_abs", "thread_size",

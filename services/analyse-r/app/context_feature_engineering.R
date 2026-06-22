@@ -4,7 +4,6 @@
 # ------------------------------------------------------------
 
 add_context_features <- function(data) {
-  data <- use_llm_features_if_available(data)
   if (!"attack_score" %in% names(data)) {
     data$attack_score <- 1L
   }
@@ -32,7 +31,7 @@ add_context_features <- function(data) {
 
   data <- data %>%
     group_by(thread_id) %>%
-    arrange(sort_timestamp, id, .by_group = TRUE) %>%
+    arrange(sort_timestamp, as.character(comment_id), .by_group = TRUE) %>%
     mutate(
       previous_comment_attack = lag(is_attack_context),
       previous_comment_attack = ifelse(is.na(previous_comment_attack), 0L, previous_comment_attack),
@@ -75,7 +74,7 @@ add_context_features <- function(data) {
 
   data <- data %>%
     group_by(thread_id) %>%
-    arrange(sort_timestamp, id, .by_group = TRUE) %>%
+    arrange(sort_timestamp, as.character(comment_id), .by_group = TRUE) %>%
     mutate(
       attack_streak_current = sapply(seq_along(is_attack_context), function(i) {
         if (i == 1) {
@@ -104,7 +103,7 @@ add_context_features <- function(data) {
 
   data <- data %>%
     group_by(thread_id) %>%
-    arrange(sort_timestamp, id, .by_group = TRUE) %>%
+    arrange(sort_timestamp, as.character(comment_id), .by_group = TRUE) %>%
     mutate(
       target_recently_attacked = ifelse(prev_attack_count > 0, 1L, 0L),
       reply_after_attack = previous_comment_attack,

@@ -18,8 +18,12 @@ def import_json():
     all_comments = []
 
     print("Importiere aus:", folder_path)
-
     for filename in os.listdir(folder_path):
+
+        if not filename.startswith("synthetic_shitstorm_dataset_"):
+            print("Überspringe:", filename)
+            continue
+
         if not filename.endswith(".json"):
             continue
 

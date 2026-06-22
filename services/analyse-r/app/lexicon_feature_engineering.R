@@ -7,9 +7,8 @@
 # Original mit 0 befüllt.
 
 add_lexicon_features <- function(data) {
-  data <- use_llm_features_if_available(data)
-
-  lexicon_cols <- c(
+  
+    lexicon_cols <- c(
     "irony",
     "swearword_count",
     "negative_word_count",

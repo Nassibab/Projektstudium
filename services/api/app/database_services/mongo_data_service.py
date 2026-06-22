@@ -1,6 +1,6 @@
 from collections import defaultdict
 from app.db.mongo import MongoDB
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 mongo = MongoDB()
@@ -146,6 +146,8 @@ def save_llm_analysis_results_per_comment(
         scores = item.get("scores", {})
         comment_id = str(item.get("comment_id"))
 
+        now = datetime.now(timezone.utc).isoformat()
+
         document = {
             "thread_id": thread_id,
             "source_file": source_file,
@@ -163,7 +165,7 @@ def save_llm_analysis_results_per_comment(
             "mockery_marker_count": scores.get("mockery_marker_count"),
             "is_attacking": scores.get("is_attacking"),
 
-            "updated_at": datetime.utcnow(),
+            "llm_analyzed_at": now,
         }
 
         collection.update_one(
@@ -172,12 +174,7 @@ def save_llm_analysis_results_per_comment(
                 "source_file": source_file,
                 "comment_id": comment_id,
             },
-            {
-                "$set": document,
-                "$setOnInsert": {
-                    "created_at": datetime.utcnow(),
-                },
-            },
+            {"$set": document},
             upsert=True,
         )
 
@@ -230,14 +227,13 @@ def get_all_comments_for_analysis():
         llm = llm_by_key.get(key_comment, {})
 
         result.append({
-            "id": c.get("comment_numeric_id"),
             "comment_id": c.get("comment_id"),
             "thread_id": c.get("thread_id"),
             "source_file": c.get("source_file"),
             "parent": c.get("parent_id"),
             "login": c.get("user"),
             "text": c.get("text"),
-            "created": c.get("created_at"),
+            "created_at": c.get("created_at"),
             "source_platform": c.get("source_platform"),
             "source_type": c.get("source_type"),
             "synthetic": c.get("synthetic"),
@@ -249,17 +245,17 @@ def get_all_comments_for_analysis():
             "scenario_type": thread.get("scenario_type"),
             "label_shitstorm": thread.get("label_shitstorm"),
 
-            "llm_irony": llm.get("irony"),
-            "llm_attack_score": llm.get("attack_score"),
-            "llm_toxicity_score": llm.get("toxicity_score"),
-            "llm_swearword_count": llm.get("swearword_count"),
-            "llm_negative_word_count": llm.get("negative_word_count"),
-            "llm_insult_count": llm.get("insult_count"),
-            "llm_direct_address_count": llm.get("direct_address_count"),
-            "llm_imperative_count": llm.get("imperative_count"),
-            "llm_accusation_marker_count": llm.get("accusation_marker_count"),
-            "llm_mockery_marker_count": llm.get("mockery_marker_count"),
-            "llm_is_attacking": llm.get("is_attacking"),
+            "irony": llm.get("irony"),
+            "attack_score": llm.get("attack_score"),
+            "toxicity_score": llm.get("toxicity_score"),
+            "swearword_count": llm.get("swearword_count"),
+            "negative_word_count": llm.get("negative_word_count"),
+            "insult_count": llm.get("insult_count"),
+            "direct_address_count": llm.get("direct_address_count"),
+            "imperative_count": llm.get("imperative_count"),
+            "accusation_marker_count": llm.get("accusation_marker_count"),
+            "mockery_marker_count": llm.get("mockery_marker_count"),
+            "is_attacking": llm.get("is_attacking"),
         })
 
     return result
@@ -312,31 +308,30 @@ def get_bluesky_comments_for_prediction():
         llm = llm_by_key.get(key_comment, {})
 
         result.append({
-            "id": c.get("comment_numeric_id"),
             "comment_id": c.get("comment_id"),
             "thread_id": c.get("thread_id"),
             "source_file": c.get("source_file"),
             "parent": c.get("parent_id"),
             "login": c.get("user"),
             "text": c.get("text"),
-            "created": c.get("created_at"),
+            "created_at": c.get("created_at"),
             "source_platform": c.get("source_platform"),
             "source_type": c.get("source_type"),
 
             "thread_title": thread.get("title"),
             "comments_count": thread.get("comments_count"),
 
-            "llm_irony": llm.get("irony"),
-            "llm_attack_score": llm.get("attack_score"),
-            "llm_toxicity_score": llm.get("toxicity_score"),
-            "llm_swearword_count": llm.get("swearword_count"),
-            "llm_negative_word_count": llm.get("negative_word_count"),
-            "llm_insult_count": llm.get("insult_count"),
-            "llm_direct_address_count": llm.get("direct_address_count"),
-            "llm_imperative_count": llm.get("imperative_count"),
-            "llm_accusation_marker_count": llm.get("accusation_marker_count"),
-            "llm_mockery_marker_count": llm.get("mockery_marker_count"),
-            "llm_is_attacking": llm.get("is_attacking"),
+            "irony": llm.get("irony"),
+            "attack_score": llm.get("attack_score"),
+            "toxicity_score": llm.get("toxicity_score"),
+            "swearword_count": llm.get("swearword_count"),
+            "negative_word_count": llm.get("negative_word_count"),
+            "insult_count": llm.get("insult_count"),
+            "direct_address_count": llm.get("direct_address_count"),
+            "imperative_count": llm.get("imperative_count"),
+            "accusation_marker_count": llm.get("accusation_marker_count"),
+            "mockery_marker_count": llm.get("mockery_marker_count"),
+            "is_attacking": llm.get("is_attacking"),
         })
 
     return result

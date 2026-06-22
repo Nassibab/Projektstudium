@@ -70,7 +70,7 @@ prepare_full_training_data <- function(data) {
         synthetic_role == "deescalation" ~ 7,
         TRUE ~ NA_real_
       ),
-      created_timestamp = as.numeric(as.POSIXct(created, tz = "Europe/Berlin"))
+      created_timestamp = as.numeric(as.POSIXct(created_at, tz = "Europe/Berlin"))
     ) %>%
     filter(!is.na(synthetic_role))
 
@@ -79,8 +79,8 @@ prepare_full_training_data <- function(data) {
     levels = c(1, 2, 3, 4, 5, 6, 7)
   )
 
-  professor_data$comments_count <- as.integer(professor_data$comments_count)
-  professor_data$created_timestamp <- as.numeric(professor_data$created_timestamp)
+ professor_data$comments_count <- as.integer(professor_data$comments_count)
+ professor_data$created_timestamp <- as.numeric(professor_data$created_timestamp)
 
  professor_data <- add_thread_features(professor_data)
  professor_data <- add_user_features(professor_data)
