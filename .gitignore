@@ -39,3 +39,4 @@ services/frontend/dist/
 
 # Docker local overrides
 docker-compose.override.yaml
+

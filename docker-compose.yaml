@@ -123,6 +123,7 @@ services:
       - "8030:8000"
     environment:
       API_URL: http://api:8000
+      LLMAPI_KEY: ${LLMAPI_KEY}
     restart: unless-stopped
 
 volumes:

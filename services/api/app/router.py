@@ -29,6 +29,68 @@ router = APIRouter()
 def read_root():
     return {"message": "API is running"}
 
+@router.post("/import/professor")
+def import_professor_data_into_MongoDB():
+    import_json()
+
+    return {
+        "status": "success",
+        "message": "Professor data imported"
+    }
+
+@router.post("/sync/graph")
+def sync_MongoDB_NEO4J():
+    return sync_all_threads_to_graph()
+
+@router.get("/report/threads")
+def report_threads_in_MongoDB_and_NEO4J():
+    return get_thread_report()
+
+@router.post("/sync/reset-missing-neo4j")
+def reset_missing_neo4j_sync_status():
+    return reset_mongo_sync_status_if_missing_in_neo4j()
+
+@router.get("/analysis/comments")
+def get_analysis_comments():
+    return get_comments_for_analysis()
+
+
+@router.get("/demo/stream")
+def stream_demo_updates():
+    return StreamingResponse(iter_thread_updates(), media_type="text/event-stream")
+
+
+@router.post("/demo/publish")
+def publish_demo_update():
+    payload = {
+        "type": "comment_added",
+        "threadId": 1,
+        "comment": {
+            "id": 999,
+            "author": "Redis Demo",
+            "time": "2026-06-10T12:00:00Z",
+            "text": "Dieser Kommentar wurde über Redis an die offene Dashboard-Sitzung gesendet.",
+            "moderation": "Demo-Event aus dem Redis-SSE-Pfad.",
+            "kpis": [
+                {"name": "Toxizität", "value": 0.18},
+                {"name": "Respekt", "value": 0.22},
+                {"name": "Relevanz", "value": 0.30},
+                {"name": "Klarheit", "value": 0.25},
+                {"name": "Emotionalität", "value": 0.20},
+                {"name": "Sachlichkeit", "value": 0.28},
+            ],
+            "score": 0.24,
+        },
+    }
+
+    subscribers = publish_thread_update(payload)
+
+    return {
+        "status": "ok",
+        "subscribers": subscribers,
+        "event": payload,
+    }
+
 
 # ------------------------------------------------------------------------------
 # Importiert die Professor-Datasets aus den JSON-Dateien in MongoDB.
