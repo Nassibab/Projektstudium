@@ -18,7 +18,7 @@ import json
 import sys
 from pathlib import Path
 from typing import Any
-
+from evaluation_window_report import print_and_save_aggregated_windows
 
 LEVEL_ORDER = {
     "normal": 0,
@@ -247,6 +247,13 @@ def evaluate_one_thread(thread_file: Path, output_dir: Path) -> None:
     print("\nGespeichert:")
     print(f"- {csv_path}")
     print(f"- {json_path}")
+    
+    print_and_save_aggregated_windows(
+        service=service,
+        output_dir=output_dir,
+        thread_file=thread_file,
+    )
+
 
 
 def main() -> None:
@@ -268,6 +275,7 @@ def main() -> None:
         raise FileNotFoundError(thread_file)
 
     evaluate_one_thread(thread_file, args.output)
+
 
 
 if __name__ == "__main__":
