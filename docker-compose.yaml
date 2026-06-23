@@ -114,6 +114,8 @@ services:
     environment:
       API_URL: http://api:8000
       MODERATION_URL: http://moderation:8000
+    volumes:
+      - analyse_r_models:/app/models
     restart: unless-stopped
 
   moderation:
@@ -129,3 +131,4 @@ services:
 volumes:
   mongodb_data: {}
   neo4j_data: {}
+  analyse_r_models: {}
