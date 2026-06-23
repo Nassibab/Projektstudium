@@ -1,0 +1,7 @@
+thread_id,window_start,window_end,comment_count,unique_users,dominant_user_ratio,thread_user_count,thread_comment_count,thread_max_user_share,attack_count,attack_ratio,attack_score_mean,attack_score_max,toxic_count,toxic_ratio,toxicity_score_mean,toxicity_score_max,insult_comment_count,insult_ratio,insult_count_sum,swearword_comment_count,swearword_ratio,negative_word_count_mean,recent_attack_rate_3_mean,recent_attack_rate_5_mean,attack_streak_max,reply_after_attack_ratio,direct_address_mean,accusation_marker_mean,mockery_marker_mean,target_recently_attacked_ratio
+9101,2026-01-01T12:00:00+00:00,2026-01-01T12:05:00+00:00,3,,,27,42,0.119,0,0.0,1.333,2.0,0,0.0,1.333,2.0,0,0.0,0.0,0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0
+9101,2026-01-01T12:05:00+00:00,2026-01-01T12:10:00+00:00,4,,,27,42,0.119,0,0.0,1.5,2.0,0,0.0,1.5,2.0,0,0.0,0.0,0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0
+9101,2026-01-01T12:10:00+00:00,2026-01-01T12:15:00+00:00,5,,,27,42,0.119,0,0.0,1.4,2.0,0,0.0,1.4,2.0,0,0.0,0.0,0,0.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0
+9101,2026-01-01T12:15:00+00:00,2026-01-01T12:20:00+00:00,10,,,27,42,0.119,0,0.0,1.5,2.0,0,0.0,1.5,2.0,0,0.0,0.0,0,0.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0
+9101,2026-01-01T12:20:00+00:00,2026-01-01T12:25:00+00:00,12,,,27,42,0.119,0,0.0,1.5,2.0,0,0.0,1.5,2.0,0,0.0,0.0,0,0.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0
+9101,2026-01-01T12:25:00+00:00,2026-01-01T12:30:00+00:00,8,,,27,42,0.119,0,0.0,1.5,2.0,0,0.0,1.5,2.0,0,0.0,0.0,0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0
