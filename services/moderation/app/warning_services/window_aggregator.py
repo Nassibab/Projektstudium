@@ -1,179 +1,234 @@
-from collections import Counter
-
-#berechnet aus mehreren Kommentaren EINES Fensters zusammenfassende Werte.
-
 class WindowAggregator:
+    """
+    Berechnet reine Fenster-Messwerte aus den festen Analyse-R-Metriken.
+    """
+
+    REQUIRED_ANALYSE_R_FIELDS = [
+        "is_long_thread",
+        "created_at",
+        "id",
+        "synthetic_role",
+        "irony",
+        "negative_word_count",
+        "insult_count",
+        "is_attacking",
+        "attack_score",
+        "swearword_count",
+        "toxicity_score",
+        "direct_address_count",
+        "imperative_count",
+        "accusation_marker_count",
+        "mockery_marker_count",
+        "login_count",
+        "login_percentage",
+        "frequency_group",
+        "date_timestamp",
+        "thread_position_abs",
+        "thread_size",
+        "thread_position_rel",
+        "num_previous_comments",
+        "is_thread_start",
+        "is_reply",
+        "previous_comment_exists",
+        "time_since_thread_start",
+        "time_since_previous_comment",
+        "user_thread_comment_count_before",
+        "user_thread_comment_count_total",
+        "user_previous_thread_share",
+        "reply_depth",
+        "num_children",
+        "parent_is_root",
+        "is_target_login_numeric",
+        "thread_user_count",
+        "thread_comment_count",
+        "thread_mean_comments_per_user",
+        "thread_max_comments_by_one_user",
+        "thread_single_comment_user_count",
+        "thread_max_user_share",
+        "thread_single_comment_user_share",
+        "log_time_since_thread_start",
+        "log_time_since_previous_comment",
+        "previous_comment_attack",
+        "prev_attack_count",
+        "prev_attack_rate",
+        "prev_toxicity_score_mean",
+        "prev_toxicity_score_max",
+        "prev_attack_score_max",
+        "recent_attack_rate_3",
+        "recent_attack_rate_5",
+        "attack_streak_current",
+        "target_recently_attacked",
+        "reply_after_attack",
+        "target_response_context_score",
+    ]
+
     def __init__(self, window_store):
         self.window_store = window_store
 
-    def _to_float(self, value, default=0.0):
+    def _validate_comment(self, comment):
+        missing = [field for field in self.REQUIRED_ANALYSE_R_FIELDS if field not in comment]
+        if missing:
+            raise KeyError(f"Kommentar enthält nicht alle festen Analyse-R-Metriken. Fehlend: {missing}")
+
+    def _to_float(self, value, field_name):
         try:
-            if value is None:
-                return default
             return float(value)
         except (ValueError, TypeError):
-            return default
+            raise ValueError(f"Feld '{field_name}' muss numerisch interpretierbar sein. Wert: {value!r}")
 
-    def _to_int(self, value, default=0):
+    def _to_int(self, value, field_name):
         try:
-            if value is None:
-                return default
-            return int(value)
+            return int(float(value))
         except (ValueError, TypeError):
-            return default
+            raise ValueError(f"Feld '{field_name}' muss als Integer interpretierbar sein. Wert: {value!r}")
 
     def _mean(self, values):
-        values = [v for v in values if v is not None]
-        return sum(values) / len(values) if values else 0
-    
-     
-     #Funktion nimmt ein bestimmtes Zeitfenster + Thread und berechnet daraus Kennzahlen
+        return sum(values) / len(values) if values else 0.0
+
     def aggregate(self, thread_id, window_start):
         comments = self.window_store.get_comments(thread_id, window_start)
+
+        for comment in comments:
+            self._validate_comment(comment)
+
         comment_count = len(comments)
-
-        users = [c.get("login") for c in comments if c.get("login")]
-        user_counts = Counter(users)
-
-        unique_users = len(user_counts)
-        max_user_comments = max(user_counts.values()) if user_counts else 0
-        dominant_user_ratio = max_user_comments / comment_count if comment_count else 0
-
-        is_attacking_values = [
-            self._to_int(c.get("is_attacking"), 0)
-            for c in comments
-        ]
+        if comment_count == 0:
+            raise ValueError("Für das angeforderte Fenster liegen keine Kommentare vor.")
 
         attack_scores = [
-            self._to_float(c.get("attack_score"), 1)
+            self._to_float(c["attack_score"], "attack_score")
             for c in comments
         ]
-
         toxicity_scores = [
-            self._to_float(c.get("toxicity_score"), 1)
+            self._to_float(c["toxicity_score"], "toxicity_score")
             for c in comments
         ]
-
         insult_counts = [
-            self._to_float(c.get("insult_count"), 0)
+            self._to_float(c["insult_count"], "insult_count")
             for c in comments
         ]
-
         swearword_counts = [
-            self._to_float(c.get("swearword_count"), 0)
+            self._to_float(c["swearword_count"], "swearword_count")
             for c in comments
         ]
-
         negative_word_counts = [
-            self._to_float(c.get("negative_word_count"), 0)
+            self._to_float(c["negative_word_count"], "negative_word_count")
             for c in comments
         ]
-
         direct_address_counts = [
-            self._to_float(c.get("direct_address_count"), 0)
+            self._to_float(c["direct_address_count"], "direct_address_count")
             for c in comments
         ]
-
         accusation_marker_counts = [
-            self._to_float(c.get("accusation_marker_count"), 0)
+            self._to_float(c["accusation_marker_count"], "accusation_marker_count")
             for c in comments
         ]
-
         mockery_marker_counts = [
-            self._to_float(c.get("mockery_marker_count"), 0)
+            self._to_float(c["mockery_marker_count"], "mockery_marker_count")
             for c in comments
         ]
-
         irony_values = [
-            self._to_float(c.get("irony"), 0)
+            self._to_float(c["irony"], "irony")
             for c in comments
         ]
-
-        attack_streak_values = [
-            self._to_float(c.get("attack_streak_current"), 0)
-            for c in comments
-        ]
-
         recent_attack_rate_3_values = [
-            self._to_float(c.get("recent_attack_rate_3"), 0)
+            self._to_float(c["recent_attack_rate_3"], "recent_attack_rate_3")
             for c in comments
         ]
-
         recent_attack_rate_5_values = [
-            self._to_float(c.get("recent_attack_rate_5"), 0)
+            self._to_float(c["recent_attack_rate_5"], "recent_attack_rate_5")
             for c in comments
         ]
-
+        attack_streak_values = [
+            self._to_float(c["attack_streak_current"], "attack_streak_current")
+            for c in comments
+        ]
         target_recently_attacked_values = [
-            self._to_int(c.get("target_recently_attacked"), 0)
+            self._to_int(c["target_recently_attacked"], "target_recently_attacked")
             for c in comments
         ]
-
         reply_after_attack_values = [
-            self._to_int(c.get("reply_after_attack"), 0)
+            self._to_int(c["reply_after_attack"], "reply_after_attack")
             for c in comments
         ]
-
         reply_depth_values = [
-            self._to_float(c.get("reply_depth"), 0)
+            self._to_float(c["reply_depth"], "reply_depth")
             for c in comments
         ]
-
         num_children_values = [
-            self._to_float(c.get("num_children"), 0)
+            self._to_float(c["num_children"], "num_children")
             for c in comments
         ]
 
-        attack_count = sum(1 for v in is_attacking_values if v == 1)
-        toxic_count = sum(1 for v in toxicity_scores if v >= 4)
-        insult_comment_count = sum(1 for v in insult_counts if v > 0)
-        swearword_comment_count = sum(1 for v in swearword_counts if v > 0)
+        # Feste Angriffsdefinition 
+        # Im Projektkontext gilt attack_score >= 5 als Angriff.
+        attack_count = sum(1 for value in attack_scores if value >= 5)
+        toxic_count = sum(1 for value in toxicity_scores if value >= 4)
+        insult_comment_count = sum(1 for value in insult_counts if value > 0)
+        swearword_comment_count = sum(1 for value in swearword_counts if value > 0)
+
+        thread_user_count = max(
+            self._to_int(c["thread_user_count"], "thread_user_count")
+            for c in comments
+        )
+        thread_comment_count = max(
+            self._to_int(c["thread_comment_count"], "thread_comment_count")
+            for c in comments
+        )
+        thread_max_user_share = max(
+            self._to_float(c["thread_max_user_share"], "thread_max_user_share")
+            for c in comments
+        )
 
         return {
             "thread_id": thread_id,
             "window_start": window_start.isoformat(),
             "window_end": self.window_store.get_window_end(window_start).isoformat(),
 
-            # Activity
+            # Aktivität / Frequenz
             "comment_count": comment_count,
-            "unique_users": unique_users,
-            "dominant_user_ratio": round(dominant_user_ratio, 3),
+            "thread_user_count": thread_user_count,
+            "thread_comment_count": thread_comment_count,
+            "thread_max_user_share": round(thread_max_user_share, 3),
 
-            # Aggression
+            # Angriff / Aggression
             "attack_count": attack_count,
-            "attack_ratio": round(attack_count / comment_count, 3) if comment_count else 0,
+            "attack_ratio": round(attack_count / comment_count, 3),
             "attack_score_mean": round(self._mean(attack_scores), 3),
-            "attack_score_max": max(attack_scores) if attack_scores else 0,
+            "attack_score_max": max(attack_scores),
 
-            # Toxicity
+            # Toxizität
             "toxic_count": toxic_count,
-            "toxic_ratio": round(toxic_count / comment_count, 3) if comment_count else 0,
+            "toxic_ratio": round(toxic_count / comment_count, 3),
             "toxicity_score_mean": round(self._mean(toxicity_scores), 3),
-            "toxicity_score_max": max(toxicity_scores) if toxicity_scores else 0,
+            "toxicity_score_max": max(toxicity_scores),
 
-            # Insults / negative language
+            # Negative Sprache
             "insult_comment_count": insult_comment_count,
-            "insult_ratio": round(insult_comment_count / comment_count, 3) if comment_count else 0,
-            "insult_count_sum": sum(insult_counts),
+            "insult_ratio": round(insult_comment_count / comment_count, 3),
+            "insult_count_sum": round(sum(insult_counts), 3),
             "swearword_comment_count": swearword_comment_count,
-            "swearword_ratio": round(swearword_comment_count / comment_count, 3) if comment_count else 0,
+            "swearword_ratio": round(swearword_comment_count / comment_count, 3),
             "negative_word_count_mean": round(self._mean(negative_word_counts), 3),
 
-            # Personalization / conflict markers
+            # Zielgerichteter Konflikt / Personalisierung
             "direct_address_mean": round(self._mean(direct_address_counts), 3),
             "accusation_marker_mean": round(self._mean(accusation_marker_counts), 3),
             "mockery_marker_mean": round(self._mean(mockery_marker_counts), 3),
-            "irony_mean": round(self._mean(irony_values), 3),
+            "target_recently_attacked_ratio": round(
+                sum(target_recently_attacked_values) / comment_count,
+                3,
+            ),
 
-            # Escalation dynamics from Analyse-R
-            "attack_streak_max": max(attack_streak_values) if attack_streak_values else 0,
+            # Eskalationsdynamik
             "recent_attack_rate_3_mean": round(self._mean(recent_attack_rate_3_values), 3),
             "recent_attack_rate_5_mean": round(self._mean(recent_attack_rate_5_values), 3),
-            "target_recently_attacked_ratio": round(sum(target_recently_attacked_values) / comment_count, 3) if comment_count else 0,
-            "reply_after_attack_ratio": round(sum(reply_after_attack_values) / comment_count, 3) if comment_count else 0,
+            "attack_streak_max": max(attack_streak_values),
+            "reply_after_attack_ratio": round(sum(reply_after_attack_values) / comment_count, 3),
 
-            # Thread interaction structure
+            # Erklärung / Debug, nicht Hauptscore
+            "irony_mean": round(self._mean(irony_values), 3),
             "reply_depth_mean": round(self._mean(reply_depth_values), 3),
-            "reply_depth_max": max(reply_depth_values) if reply_depth_values else 0,
+            "reply_depth_max": max(reply_depth_values),
             "num_children_mean": round(self._mean(num_children_values), 3),
         }
