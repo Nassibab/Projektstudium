@@ -15,6 +15,7 @@ from .models import (
     IndicatorResult,
     IndicatorSpec,
     SafeNumber,
+    WarningLevel,
 )
 from .policy import WarningLevelPolicy
 from .statistics_tools import EvidenceTransformer, PValueCalculator, PValueCombiner
@@ -52,7 +53,11 @@ class ShitstormScorer:
         self.warning_policy = WarningLevelPolicy()
 
     def calculate_final_score(self, thread_id: str, metrics: Dict[str, Any]) -> Dict[str, Any]:
-        previous_barometer_values = self.history.previous_barometer_values(thread_id)
+        current_window_start = metrics.get("window_start")
+        previous_barometer_values = self.history.previous_barometer_values(
+            thread_id,
+            current_window_start=current_window_start,
+        )
 
         dimension_results = self._analyze_dimensions(thread_id, metrics)
         score_raw = self._calculate_weighted_score(dimension_results)
@@ -60,6 +65,17 @@ class ShitstormScorer:
         barometer_score = score_raw * gate
         barometer_percent = round(barometer_score * 100, 2)
         warning_level = self.warning_policy.decide(barometer_score, dimension_results)
+
+        # Hybrid-Sicherheitsregel:
+        # Der p-Wert-Score erkennt Auffälligkeiten relativ zur Thread-Historie.
+        # Sehr starke absolute Eskalation soll aber auch dann mindestens als
+        # critical sichtbar werden, wenn einzelne relative Evidenzwerte durch
+        # Gruppierung/Gate konservativ bleiben.
+        absolute_critical = self._absolute_critical_override(metrics)
+        if absolute_critical:
+            barometer_score = max(barometer_score, 0.60)
+            barometer_percent = round(barometer_score * 100, 2)
+            warning_level = WarningLevel.CRITICAL.value
 
         metrics_for_history = dict(metrics)
         metrics_for_history.update(
@@ -69,7 +85,7 @@ class ShitstormScorer:
                 "warning_level": warning_level,
             }
         )
-        self.history.append(thread_id, metrics_for_history)
+        self.history.upsert(thread_id, metrics_for_history)
 
         return {
             "thread_id": thread_id,
@@ -78,6 +94,7 @@ class ShitstormScorer:
             "warning_level": warning_level,
             "score_raw_0_1": round(score_raw, 4),
             "gate_0_1": round(gate, 4),
+            "absolute_critical_override": absolute_critical,
             "dimension_scores": {
                 name: round(result.evidence_score, 4)
                 for name, result in dimension_results.items()
@@ -128,10 +145,15 @@ class ShitstormScorer:
         indicators: List[IndicatorSpec],
     ) -> Dict[str, IndicatorResult]:
         results: Dict[str, IndicatorResult] = {}
+        current_window_start = metrics.get("window_start")
 
         for indicator in indicators:
             current_value = SafeNumber.to_float(metrics.get(indicator.name, 0.0))
-            previous_values = self.history.previous_metric_values(thread_id, indicator.name)
+            previous_values = self.history.previous_metric_values(
+                thread_id,
+                indicator.name,
+                current_window_start=current_window_start,
+            )
             p_value = self.p_values.calculate(indicator.method, current_value, previous_values)
             evidence_score = self.evidence.transform(p_value)
 
@@ -207,6 +229,21 @@ class ShitstormScorer:
         frequency = dimension_results["frequency"].evidence_score
         aggression = dimension_results["aggression_toxicity"].evidence_score
         return min(frequency, aggression)
+
+    @staticmethod
+    def _absolute_critical_override(metrics: Dict[str, Any]) -> bool:
+        """Absolute Mindestregel für sehr starke Eskalationsfenster.
+
+        Diese Regel ergänzt den relativen p-Wert-Score. Sie verhindert, dass ein
+        offensichtlich kritisches Fenster nur deshalb niedrig bleibt, weil der
+        Composite Score sehr konservativ aggregiert.
+        """
+        return (
+            SafeNumber.to_float(metrics.get("comment_count")) >= 10
+            and SafeNumber.to_float(metrics.get("attack_ratio")) >= 0.70
+            and SafeNumber.to_float(metrics.get("toxic_ratio")) >= 0.70
+            and SafeNumber.to_float(metrics.get("attack_streak_max")) >= 5
+        )
 
     def _method_description(self) -> str:
         if self.dimension_combiner == "mean":
