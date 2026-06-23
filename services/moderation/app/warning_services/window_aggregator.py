@@ -40,6 +40,8 @@ class WindowAggregator:
         max_user_comments = max(user_counts.values()) if user_counts else 0
         dominant_user_ratio = max_user_comments / comment_count if comment_count else 0
 
+
+        #
         is_attacking_values = [
             self._to_int(c.get("is_attacking"), 0)
             for c in comments
