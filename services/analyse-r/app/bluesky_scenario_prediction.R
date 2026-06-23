@@ -47,8 +47,8 @@ prepare_full_bluesky_data <- function(data) {
 # Lädt gespeichertes Professor-Modell und predicted Bluesky.
 # Trainiert NICHT neu.
 # ----------------------------------------------------------------------------------
-predict_bluesky_synthetic_roles <- function() {
-  data <- load_analysis_bluesky ()
+predict_bluesky_synthetic_roles <- function(thread_id = NULL) {
+  data <- load_analysis_bluesky(thread_id)
 
   if (!file.exists(MODEL_PATH)) {
     stop("Kein gespeichertes Modell gefunden. Bitte zuerst /train-full-model ausführen.")

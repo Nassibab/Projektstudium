@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 from typing import Any
 
 from app.services.mongodb_graph_sync import(
@@ -21,6 +22,11 @@ from app.database_services.mongo_data_service import (
 )
 from app.importers.professor_llm_json_importer import import_professor_llm_dataset
 from app.services.redis_events import iter_thread_updates, publish_thread_update
+from app.services.bluesky_pipeline_service import (
+    start_bluesky_ingestion,
+    process_pending_bluesky_threads,
+)
+from app.services.training_pipeline_service import run_professor_training_pipeline
 
 
 router = APIRouter()
@@ -52,7 +58,7 @@ def reset_missing_neo4j_sync_status():
 
 @router.get("/analysis/comments")
 def get_analysis_comments():
-    return get_comments_for_analysis()
+    return get_all_comments_for_analysis()
 
 
 @router.get("/demo/stream")
@@ -167,8 +173,8 @@ def get_all_analysis_comments():
 # ------------------------------------------------------------------------------ 
 
 @router.get("/analysis/bluesky/prediction-data")
-def bluesky_prediction_data():
-    return get_bluesky_comments_for_prediction()
+def bluesky_prediction_data(thread_id: str | None = Query(default=None)):
+    return get_bluesky_comments_for_prediction(thread_id)
 
 # ------------------------------------------------------------------------------
 # Ergebnisse, die von R-Service an die API zurückgegeben werden
@@ -185,7 +191,88 @@ class AnalysisResultsPayload(BaseModel):
     professor_test_thread_results: list[dict[str, Any]] = []
     professor_test_user_results: list[dict[str, Any]] = []
     professor_test_model_results: list[dict[str, Any]] = []
-    
+
+
+class PipelineStepStatus(BaseModel):
+    step: str
+    ok: bool
+    status: str
+    duration_ms: int
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProfessorTrainingPipelineRequest(BaseModel):
+    force_reimport: bool = Field(
+        default=False,
+        description=(
+            "If true, run professor import even when professor rows already exist. "
+            "Warning: importer does not deduplicate existing rows."
+        ),
+    )
+    train_timeout_seconds: int = Field(
+        default=1800,
+        ge=30,
+        le=7200,
+        description=(
+            "Timeout in seconds for analyse-r /train-full-model request. "
+            "HTTP retries are applied for transient errors."
+        ),
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "force_reimport": False,
+                "train_timeout_seconds": 1800,
+            }
+        }
+    }
+
+
+class ProfessorTrainingPipelineResponse(BaseModel):
+    status: str
+    message: str
+    started_at: str
+    finished_at: str
+    steps: list[PipelineStepStatus]
+    warnings: list[str] = Field(default_factory=list)
+    records: dict[str, Any] = Field(default_factory=dict)
+    training_rows: int
+    training_summary: dict[str, Any] | None = None
+    failed_step: str | None = None
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "status": "success",
+                "message": "One-click professor training pipeline completed.",
+                "started_at": "2026-06-23T21:45:00+00:00",
+                "finished_at": "2026-06-23T21:46:12+00:00",
+                "records": {
+                    "professor": {
+                        "import_status": "success",
+                        "threads_imported": 5,
+                        "comments_imported": 120,
+                    },
+                    "llm": {
+                        "received": 120,
+                        "inserted": 120,
+                        "updated": 0,
+                        "skipped": 0,
+                    },
+                },
+                "steps": [],
+                "warnings": [],
+                "training_rows": 120,
+                "training_summary": {
+                    "status": "success",
+                    "accuracy": 0.91,
+                    "total_time_seconds": 65.4,
+                    "model_path": "/models/professor/latest/model.rds",
+                },
+            }
+        }
+    }
 #------------------------------------------------------------------------------
 # Speichert die Analyseergebnisse des R-Service in MongoDB
 # ------------------------------------------------------------------------------
@@ -193,6 +280,51 @@ class AnalysisResultsPayload(BaseModel):
 @router.post("/analysis/save-results")
 def save_results(payload: AnalysisResultsPayload):
     return save_analysis_results(payload.model_dump())
+
+
+@router.post(
+    "/pipeline/professor/train-model",
+    response_model=ProfessorTrainingPipelineResponse,
+    summary="One-click professor training pipeline",
+    description=(
+        "Runs the full professor setup and training flow in one request: "
+        "import professor dataset, import professor LLM features, validate "
+        "training rows, and trigger analyse-r /train-full-model."
+    ),
+)
+def train_professor_model_pipeline(payload: ProfessorTrainingPipelineRequest | None = None):
+    params = payload or ProfessorTrainingPipelineRequest()
+    return run_professor_training_pipeline(
+        force_reimport=params.force_reimport,
+        train_timeout_seconds=params.train_timeout_seconds,
+    )
+
+
+# ------------------------------------------------------------------------------
+# Bluesky-Pipeline
+# Ingestion läuft separat (Ingestion-Service). Die Analyse-Kette
+# (LLM -> Predict -> Moderation) wird per POST angestoßen.
+# ------------------------------------------------------------------------------
+
+class StartPipelineRequest(BaseModel):
+    url: str
+
+
+class ProcessPipelineRequest(BaseModel):
+    thread_id: str | None = None
+
+
+# Startet den Live-Ingestion-Stream auf dem Ingestion-Service.
+@router.post("/pipeline/bluesky/start")
+def start_bluesky_pipeline(payload: StartPipelineRequest):
+    return start_bluesky_ingestion(payload.url)
+
+
+# Analysiert einen (thread_id) oder alle Bluesky-Threads (curl / Scheduler).
+@router.post("/pipeline/bluesky/process")
+def process_bluesky_pipeline(payload: ProcessPipelineRequest | None = None):
+    thread_id = payload.thread_id if payload else None
+    return {"runs": process_pending_bluesky_threads(thread_id)}
 
 
 

@@ -264,21 +264,21 @@ def get_all_comments_for_analysis():
 #  Baut den vollständigen Bluesky Analysedatensatz für R.
 #-----------------------------------------------------------------------------------------
 
-def get_bluesky_comments_for_prediction():
-    comments = list(comments_collection.find(
-        {"source_file": "bluesky"},
-        {"_id": 0}
-    ))
+def get_bluesky_comments_for_prediction(thread_id: str | None = None):
+    comment_query = {"source_file": "bluesky"}
+    thread_query = {"source_file": "bluesky"}
+    llm_query = {"source_file": "bluesky"}
 
-    threads = list(threads_collection.find(
-        {"source_file": "bluesky"},
-        {"_id": 0}
-    ))
+    if thread_id:
+        comment_query["thread_id"] = thread_id
+        thread_query["thread_id"] = thread_id
+        llm_query["thread_id"] = thread_id
 
-    llm_results = list(mongo.collection("llm_analysis_results").find(
-        {"source_file": "bluesky"},
-        {"_id": 0}
-    ))
+    comments = list(comments_collection.find(comment_query, {"_id": 0}))
+
+    threads = list(threads_collection.find(thread_query, {"_id": 0}))
+
+    llm_results = list(mongo.collection("llm_analysis_results").find(llm_query, {"_id": 0}))
 
     threads_by_key = {
         (str(t.get("source_file")), str(t.get("thread_id"))): t
@@ -421,3 +421,61 @@ def save_analysis_results(payload: dict):
         "professor_test_user_results": len(professor_test_user_results),
         "professor_test_model_results": len(professor_test_model_results)
     }
+
+
+#------------------------------------------------------------------------------------
+# Liefert die eindeutigen Bluesky-Thread-IDs (für den Scheduler / Batch-Lauf).
+#------------------------------------------------------------------------------------
+
+def get_bluesky_thread_ids() -> list[str]:
+    thread_ids = comments_collection.distinct("thread_id", {"source_file": "bluesky"})
+    return [str(tid) for tid in thread_ids if tid is not None]
+
+
+#------------------------------------------------------------------------------------
+# Liefert die gespeicherten Bluesky-Predictions eines Threads (für die Moderation).
+#------------------------------------------------------------------------------------
+
+def get_bluesky_prediction_comments(thread_id: str) -> list[dict]:
+    return list(
+        mongo.collection("bluesky_prediction_comments_results").find(
+            {"thread_id": thread_id},
+            {"_id": 0},
+        )
+    )
+
+
+#------------------------------------------------------------------------------------
+# Speichert Moderations-Vorschläge pro Kommentar (Upsert über thread_id + comment_id).
+#------------------------------------------------------------------------------------
+
+def upsert_moderation_suggestions(thread_id: str, suggestions: list[dict]) -> int:
+    db = MongoDB()
+    collection = db.collection("moderation_suggestions")
+
+    saved_count = 0
+
+    for suggestion in suggestions:
+        comment_id = str(suggestion.get("comment_id"))
+
+        document = {
+            **suggestion,
+            "thread_id": thread_id,
+            "comment_id": comment_id,
+            "analysis_result_id": comment_id,
+            "updated_at": datetime.utcnow(),
+        }
+
+        collection.update_one(
+            {"thread_id": thread_id, "comment_id": comment_id},
+            {
+                "$set": document,
+                "$setOnInsert": {"created_at": datetime.utcnow()},
+            },
+            upsert=True,
+        )
+
+        saved_count += 1
+
+    db.close()
+    return saved_count
