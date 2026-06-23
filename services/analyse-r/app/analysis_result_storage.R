@@ -12,7 +12,7 @@ library(dplyr)
 
 COMMON_COMMENT_RESULT_FIELDS <- c(
   "comment_id", "thread_id", "source_file",
-  "login", "text", "created_at", "parent",
+  "login", "text", "created_at", "parent_id",
 
   "irony", "attack_score", "toxicity_score",
   "swearword_count", "negative_word_count", "insult_count",

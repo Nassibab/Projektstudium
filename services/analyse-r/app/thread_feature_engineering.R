@@ -38,7 +38,22 @@ calculate_reply_depth <- function(ids, parents) {
 
 
 add_thread_features <- function(data) {
-  required_cols <- c("thread_id", "comment_id", "parent", "login")
+
+  if (!"parent_id" %in% names(data) && "parent" %in% names(data)) {
+    data$parent_id <- data$parent
+  }
+
+  if (!"parent" %in% names(data) && "parent_id" %in% names(data)) {
+    data$parent <- data$parent_id
+  }
+
+  data <- data %>%
+    mutate(
+      comment_id = as.character(comment_id),
+      parent_id = as.character(parent_id),
+    )
+
+  required_cols <- c("thread_id", "comment_id", "parent_id", "login")
   missing_cols <- setdiff(required_cols, names(data))
 
   if (length(missing_cols) > 0) {
