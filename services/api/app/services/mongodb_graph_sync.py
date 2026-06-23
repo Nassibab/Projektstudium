@@ -2,11 +2,11 @@ from datetime import datetime, timezone
 
 from app.db.mongo import MongoDB
 from app.db.neo4j import get_driver
-from app.repositories.data import (
+from app.database_services.mongo_data_service import (
     get_all_threads,
     get_all_comments_grouped_by_thread,
 )
-from app.repositories.graph import save_thread_with_comments
+from app.database_services.graph_data_service import save_thread_with_comments
 
 
 mongo = MongoDB()

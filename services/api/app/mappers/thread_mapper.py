@@ -15,6 +15,7 @@ def map_thread(
 
         "source_platform": source_platform,
         "source_type": source_type,
+       
 
     }
 

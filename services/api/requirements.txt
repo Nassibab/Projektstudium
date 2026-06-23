@@ -4,3 +4,4 @@ pymongo
 python-dotenv
 neo4j
 redis>=5.0.0
+requests
