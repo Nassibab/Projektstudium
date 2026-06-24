@@ -114,3 +114,66 @@ def analyze_professor_with_llm_service() -> dict:
 # ------------------------------------------------------------------------------
 def analyze_bluesky_with_llm_service() -> dict:
     return analyze_platform_with_llm_service("bluesky")
+
+
+
+
+def analyze_one_comment_with_llm(
+    *,
+    thread_id: str,
+    source_file: str,
+    comment_id: str,
+) -> dict:
+    comments = get_thread_comments_for_llm(
+        thread_id=thread_id,
+        source_file=source_file,
+        comment_ids=[comment_id],
+    )
+
+    if not comments:
+        return {
+            "threads": 0,
+            "comments": 0,
+            "results": 0,
+            "inserted": 0,
+            "message": "Comment not found or already analyzed",
+        }
+
+    response = requests.post(
+        LLM_ANALYZE_URL,
+        json={
+            "thread_id": thread_id,
+            "comments": comments,
+            "temperature": 0.7,
+        },
+        timeout=300,
+    )
+    
+
+    response.raise_for_status()
+
+    results = response.json().get("results", [])
+
+    inserted = save_llm_analysis_results_per_comment(
+        thread_id=thread_id,
+        source_file=source_file,
+        results=results,
+    )
+
+    return {
+        "threads": 1,
+        "comments": len(comments),
+        "results": len(results),
+        "inserted": inserted,
+    }
+
+
+def analyze_one_bluesky_comment_with_llm_service(
+    thread_id: str,
+    comment_id: str,
+) -> dict:
+    return analyze_one_comment_with_llm(
+        thread_id=thread_id,
+        source_file="bluesky",
+        comment_id=comment_id,
+    )

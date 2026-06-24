@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import Any
+from fastapi import BackgroundTasks
 
 from app.services.mongodb_graph_sync import(
      sync_all_threads_to_graph,
@@ -21,6 +22,15 @@ from app.database_services.mongo_data_service import (
 )
 from app.importers.professor_llm_json_importer import import_professor_llm_dataset
 from app.services.redis_events import iter_thread_updates, publish_thread_update
+
+
+
+from app.services.bluesky_pipeline_service import run_bluesky_comment_pipeline
+
+class BlueskyCommentIngestedPayload(BaseModel):
+    thread_id: str
+    comment_id: str
+
 
 
 router = APIRouter()
@@ -451,6 +461,28 @@ def publish_demo_update():
         "status": "ok",
         "subscribers": subscribers,
         "event": payload,
+    }
+
+
+
+
+# Damit bekommt Ingestion sofort eine Antwort und muss nicht warten, bis LLM + R fertig sind.
+@router.post("/pipeline/bluesky/comment-ingested")
+def bluesky_comment_ingested(
+    payload: BlueskyCommentIngestedPayload,
+    background_tasks: BackgroundTasks,
+):
+    background_tasks.add_task(
+        run_bluesky_comment_pipeline,
+        payload.thread_id,
+        payload.comment_id,
+    )
+
+    return {
+        "status": "accepted",
+        "message": "Bluesky LLM enrichment and prediction started in background",
+        "thread_id": payload.thread_id,
+        "comment_id": payload.comment_id,
     }
     
     
