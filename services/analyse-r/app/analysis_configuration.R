@@ -14,9 +14,9 @@ MODEL_NAME <- "ranger_structure_tfidf_unigram_bigram_best_importance"
 SEED_VALUE <- 42
 TRAIN_RATIO <- 0.8
 
-# Beste bisherige TF-IDF-Konfiguration
-TFIDF_TOP_N <- 1500
-TFIDF_MIN_TERMFREQ <- 20
+# Beste bisherige TF-IDF-Konfiguration (statt 1500 und 20)
+TFIDF_TOP_N <- 300
+TFIDF_MIN_TERMFREQ <- 50
 NGRAM_MIN <- 1
 NGRAM_MAX <- 2
 

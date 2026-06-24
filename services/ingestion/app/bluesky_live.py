@@ -9,7 +9,8 @@ and fetches the original post text — all in one script.
 Requirements:
     pip install websockets atproto pydantic httpx
 """
-
+import os
+import requests
 import asyncio
 import json
 import re
@@ -105,6 +106,7 @@ def resolve_did(url: str) -> str:
         raise ValueError(f"Could not resolve DID for handle: {handle}")
     print(f"  Resolved: {did}")
     return did
+
 
 # ---------------------------------------------------------------------------
 # REST: fetch post text + existing comments
@@ -206,9 +208,26 @@ async def comment_consumer():
             print(comment.model_dump_json(indent=2))
             print(f"  Post now has {len(current_post.comments)} comments total")
             await save_comment(comment, current_post.id)
+            notify_api_comment_ingested(
+                thread_id=current_post.id,
+                comment_id=comment.id,
+                )
 
         queue.task_done()
 
+API_URL = os.getenv("API_URL", "http://api:8000")
+
+def notify_api_comment_ingested(thread_id: str, comment_id: str):
+    response = requests.post(
+        f"{API_URL}/pipeline/bluesky/comment-ingested",
+        json={
+            "thread_id": thread_id,
+            "comment_id": comment_id,
+        },
+        timeout=10,
+    )
+    response.raise_for_status()
+    return response.json()
 # ---------------------------------------------------------------------------
 # Producer: Jetstream WebSocket → queue
 # ---------------------------------------------------------------------------

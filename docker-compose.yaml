@@ -17,8 +17,10 @@ services:
       NEO4J_USER: neo4j
       NEO4J_PASSWORD: password
       ANALYSE_URL: http://analyse-py:8000
+      ANALYSE_R_URL: http://analyse-r:8000
     restart: unless-stopped
 
+    
   frontend:
     build: ./services/frontend
     container_name: groupproject_frontend
@@ -79,6 +81,7 @@ services:
     environment:
       MONGO_URL: mongodb://mongodb:27017
       MONGO_DB_NAME: shitstorm_db
+      API_URL: http://api:8000
     restart: unless-stopped
 
   analyse-py:
@@ -100,8 +103,8 @@ services:
     container_name: groupproject_llm_service
     ports:
       - "8011:8011"
-    env_file:
-      - .env
+    environment:
+      LLMAPI_KEY: ${LLMAPI_KEY}
     restart: unless-stopped
 
   analyse-r:
@@ -114,6 +117,8 @@ services:
     environment:
       API_URL: http://api:8000
       MODERATION_URL: http://moderation:8000
+    volumes:
+      - analyse_r_models:/app/models
     restart: unless-stopped
 
   moderation:
@@ -129,3 +134,4 @@ services:
 volumes:
   mongodb_data: {}
   neo4j_data: {}
+  analyse_r_models: {}

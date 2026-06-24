@@ -15,6 +15,7 @@ from .schemas.comment_analysis import (
 
 MODEL = "gpt-oss-120b"
 
+
 # Above this many comments in one thread, split into chunks to stay within
 # the model's context/output limits. Still far fewer calls than one-per-comment.
 MAX_COMMENTS_PER_CALL = 50
@@ -37,9 +38,10 @@ class LLMService:
     def client(self) -> OpenAI:
         if self._client is None:
             self._client = OpenAI(
-                base_url=os.environ["NHR_LLM_BASE_URL"],
-                api_key=os.environ["NHR_LLM_API_KEY"],
-            )
+                api_key=os.getenv("LLMAPI_KEY"),
+                base_url="https://hub.nhr.fau.de/api/llmgw/v1",
+                )
+
         return self._client
 
     def chat(

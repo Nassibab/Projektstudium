@@ -1,0 +1,237 @@
+{
+    "status": [
+        "success"
+    ],
+    "model_loaded_from": [
+        "models/professor_synthetic_role_model.rds"
+    ],
+    "target": [
+        "synthetic_role"
+    ],
+    "predicted_rows": [
+        12
+    ],
+    "predictions": [
+        {
+            "comment_id": "3moysdy2uck2o",
+            "thread_id": "3moytadle7c2o",
+            "login": "did:plc:3dkpzgjzxqorrglqpgbwoi62",
+            "text": "Schlecht",
+            "created_at": "2026-06-24 01:48:52",
+            "predicted_synthetic_role": "3",
+            "predicted_synthetic_role_label": "discussion",
+            "prob_root": 0.4303,
+            "prob_meta": 0.0548,
+            "prob_discussion": 0.2306,
+            "prob_counter_speech": 0.079,
+            "prob_attack": 0.1956,
+            "prob_target_response": 0.0018,
+            "prob_deescalation": 0.008
+        },
+        {
+            "comment_id": "3moysdy2uck2o",
+            "thread_id": "3moytadle7c2o",
+            "login": "did:plc:3dkpzgjzxqorrglqpgbwoi62",
+            "text": "Schlecht",
+            "created_at": "2026-06-24 01:48:52",
+            "predicted_synthetic_role": "3",
+            "predicted_synthetic_role_label": "discussion",
+            "prob_root": 0.1935,
+            "prob_meta": 0.084,
+            "prob_discussion": 0.3388,
+            "prob_counter_speech": 0.0821,
+            "prob_attack": 0.2825,
+            "prob_target_response": 0.0087,
+            "prob_deescalation": 0.0103
+        },
+        {
+            "comment_id": "3moysea73hc2o",
+            "thread_id": "3moytadle7c2o",
+            "login": "did:plc:3dkpzgjzxqorrglqpgbwoi62",
+            "text": "dumm",
+            "created_at": "2026-06-24 01:49:00",
+            "predicted_synthetic_role": "5",
+            "predicted_synthetic_role_label": "attack",
+            "prob_root": 0.102,
+            "prob_meta": 0.0583,
+            "prob_discussion": 0.2485,
+            "prob_counter_speech": 0.0641,
+            "prob_attack": 0.5125,
+            "prob_target_response": 0.0067,
+            "prob_deescalation": 0.0081
+        },
+        {
+            "comment_id": "3moysf7sfr22o",
+            "thread_id": "3moytadle7c2o",
+            "login": "did:plc:3dkpzgjzxqorrglqpgbwoi62",
+            "text": "Warum? Mach das jetzt!!!",
+            "created_at": "2026-06-24 01:49:34",
+            "predicted_synthetic_role": "3",
+            "predicted_synthetic_role_label": "discussion",
+            "prob_root": 0.0884,
+            "prob_meta": 0.141,
+            "prob_discussion": 0.328,
+            "prob_counter_speech": 0.1194,
+            "prob_attack": 0.2913,
+            "prob_target_response": 0.0147,
+            "prob_deescalation": 0.0173
+        },
+        {
+            "comment_id": "3moyt5m3lgk2o",
+            "thread_id": "3moytadle7c2o",
+            "login": "did:plc:3dkpzgjzxqorrglqpgbwoi62",
+            "text": "upsiiiiii",
+            "created_at": "2026-06-24 02:03:12",
+            "predicted_synthetic_role": "3",
+            "predicted_synthetic_role_label": "discussion",
+            "prob_root": 0.0853,
+            "prob_meta": 0.0391,
+            "prob_discussion": 0.4999,
+            "prob_counter_speech": 0.074,
+            "prob_attack": 0.2146,
+            "prob_target_response": 0.0027,
+            "prob_deescalation": 0.0845
+        },
+        {
+            "comment_id": "3moyt5m3lgk2o",
+            "thread_id": "3moytadle7c2o",
+            "login": "did:plc:3dkpzgjzxqorrglqpgbwoi62",
+            "text": "upsiiiiii",
+            "created_at": "2026-06-24 02:03:12",
+            "predicted_synthetic_role": "3",
+            "predicted_synthetic_role_label": "discussion",
+            "prob_root": 0.0821,
+            "prob_meta": 0.1241,
+            "prob_discussion": 0.3549,
+            "prob_counter_speech": 0.1024,
+            "prob_attack": 0.2998,
+            "prob_target_response": 0.0161,
+            "prob_deescalation": 0.0206
+        },
+        {
+            "comment_id": "3moyt64cyjk2o",
+            "thread_id": "3moytadle7c2o",
+            "login": "did:plc:3dkpzgjzxqorrglqpgbwoi62",
+            "text": "privet",
+            "created_at": "2026-06-24 02:03:29",
+            "predicted_synthetic_role": "3",
+            "predicted_synthetic_role_label": "discussion",
+            "prob_root": 0.0721,
+            "prob_meta": 0.1236,
+            "prob_discussion": 0.354,
+            "prob_counter_speech": 0.1003,
+            "prob_attack": 0.3145,
+            "prob_target_response": 0.0161,
+            "prob_deescalation": 0.0195
+        },
+        {
+            "comment_id": "3moyt6n576k2o",
+            "thread_id": "3moytadle7c2o",
+            "login": "did:plc:3dkpzgjzxqorrglqpgbwoi62",
+            "text": "hahahahaha",
+            "created_at": "2026-06-24 02:03:46",
+            "predicted_synthetic_role": "3",
+            "predicted_synthetic_role_label": "discussion",
+            "prob_root": 0.0701,
+            "prob_meta": 0.1269,
+            "prob_discussion": 0.36,
+            "prob_counter_speech": 0.1007,
+            "prob_attack": 0.3044,
+            "prob_target_response": 0.0168,
+            "prob_deescalation": 0.0212
+        },
+        {
+            "comment_id": "3moytadle7c2o",
+            "thread_id": "3moytadle7c2o",
+            "login": "did:plc:3dkpzgjzxqorrglqpgbwoi62",
+            "text": "Kino",
+            "created_at": "2026-06-24 02:04:44",
+            "predicted_synthetic_role": "1",
+            "predicted_synthetic_role_label": "root",
+            "prob_root": 0.3572,
+            "prob_meta": 0.0985,
+            "prob_discussion": 0.2468,
+            "prob_counter_speech": 0.0698,
+            "prob_attack": 0.1898,
+            "prob_target_response": 0.0166,
+            "prob_deescalation": 0.0211
+        },
+        {
+            "comment_id": "3moytcf6wq226",
+            "thread_id": "3moytadle7c2o",
+            "login": "did:plc:3dkpzgjzxqorrglqpgbwoi62",
+            "text": "heute?",
+            "created_at": "2026-06-24 02:05:52",
+            "predicted_synthetic_role": "3",
+            "predicted_synthetic_role_label": "discussion",
+            "prob_root": 0.0092,
+            "prob_meta": 0.1497,
+            "prob_discussion": 0.3955,
+            "prob_counter_speech": 0.1086,
+            "prob_attack": 0.2952,
+            "prob_target_response": 0.0181,
+            "prob_deescalation": 0.0237
+        },
+        {
+            "comment_id": "3moytcuccis26",
+            "thread_id": "3moytadle7c2o",
+            "login": "did:plc:3dkpzgjzxqorrglqpgbwoi62",
+            "text": "Nein, du Idiot",
+            "created_at": "2026-06-24 02:06:08",
+            "predicted_synthetic_role": "5",
+            "predicted_synthetic_role_label": "attack",
+            "prob_root": 0.0024,
+            "prob_meta": 0.0156,
+            "prob_discussion": 0.1264,
+            "prob_counter_speech": 0.0643,
+            "prob_attack": 0.7326,
+            "prob_target_response": 0.0418,
+            "prob_deescalation": 0.017
+        },
+        {
+            "comment_id": "3moytdahsek26",
+            "thread_id": "3moytadle7c2o",
+            "login": "did:plc:3dkpzgjzxqorrglqpgbwoi62",
+            "text": "Wo ist das den?",
+            "created_at": "2026-06-24 02:06:21",
+            "predicted_synthetic_role": "3",
+            "predicted_synthetic_role_label": "discussion",
+            "prob_root": 0.002,
+            "prob_meta": 0.2237,
+            "prob_discussion": 0.2918,
+            "prob_counter_speech": 0.1368,
+            "prob_attack": 0.2554,
+            "prob_target_response": 0.0407,
+            "prob_deescalation": 0.0495
+        }
+    ],
+    "save_status": {
+        "status": [
+            "success"
+        ],
+        "bluesky_prediction_comments_results": [
+            12
+        ],
+        "bluesky_prediction_thread_results": [
+            1
+        ],
+        "bluesky_prediction_user_results": [
+            1
+        ],
+        "bluesky_prediction_model_results": [
+            1
+        ],
+        "professor_test_comment_results": [
+            0
+        ],
+        "professor_test_thread_results": [
+            0
+        ],
+        "professor_test_user_results": [
+            0
+        ],
+        "professor_test_model_results": [
+            0
+        ]
+    }
+}
