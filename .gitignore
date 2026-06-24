@@ -41,4 +41,4 @@ services/frontend/dist/
 docker-compose.override.yaml
 
 #Evalution
-services/moderation/app/evaluation_one_thread_results/
+services/moderation/app/evaluation_one_thread_results/.env
