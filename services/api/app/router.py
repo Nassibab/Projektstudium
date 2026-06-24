@@ -1,37 +1,29 @@
 import requests
-from typing import Optional
-from fastapi import APIRouter, HTTPException, Query, BackgroundTasks, Body
-from pydantic import BaseModel
-from typing import Any
+from typing import Any, Optional
+
+from fastapi import APIRouter, BackgroundTasks, Body
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 
-from app.services.mongodb_graph_sync import(
-     sync_all_threads_to_graph,
-     reset_mongo_sync_status_if_missing_in_neo4j,
-     
-)
-
-from app.services.llm_analysis_service import (
-    analyze_professor_with_llm_service,
-    analyze_bluesky_with_llm_service,
-)
-from app.services.report_service import get_thread_report
-from app.importers.professor_json_importer import import_json
 from app.database_services.mongo_data_service import (
-     get_all_comments_for_analysis,
-     save_analysis_results,
-     get_bluesky_comments_for_prediction
+    get_all_comments_for_analysis,
+    get_bluesky_comments_for_prediction,
+    save_analysis_results,
 )
-from app.importers.professor_llm_json_importer import import_professor_llm_dataset
-from app.services.redis_events import iter_thread_updates, publish_thread_update
-from app.services.demo_cache import ensure_cached_demo_data, update_cached_demo_data
-
-from app.services.mongodb_graph_sync import (
-    sync_all_threads_to_graph,
-    reset_mongo_sync_status_if_missing_in_neo4j,
-)
-
 from app.db.mongo import MongoDB
+from app.importers.professor_json_importer import import_json
+from app.importers.professor_llm_json_importer import import_professor_llm_dataset
+from app.services.demo_cache import update_cached_demo_data
+from app.services.llm_analysis_service import (
+    analyze_bluesky_with_llm_service,
+    analyze_professor_with_llm_service,
+)
+from app.services.mongodb_graph_sync import (
+    reset_mongo_sync_status_if_missing_in_neo4j,
+    sync_all_threads_to_graph,
+)
+from app.services.redis_events import iter_thread_updates, publish_thread_update
+from app.services.report_service import get_thread_report
 
 router = APIRouter()
 
@@ -104,7 +96,7 @@ def reset_missing_neo4j_sync_status():
 
 @router.get("/analysis/comments")
 def get_analysis_comments():
-    return get_comments_for_analysis()
+    return get_all_comments_for_analysis()
 
 @router.get("/demo/stream")
 def stream_demo_updates():
@@ -116,16 +108,12 @@ def event_llm_labeled(payload: dict, background_tasks: BackgroundTasks):
     """
     SCHRITT 1: Wird vom LLM (analyse-py) aufgerufen, sobald Labels fertig sind.
     """
-    # 1. UI sofort updaten (User sieht das Event live)
     update_cached_demo_data(payload)
     publish_thread_update(payload)
-    
-    # 2. Zwischenstand in DB sichern
+
     background_tasks.add_task(save_to_mongodb_background, payload)
-    
-    # 3. An R (Analyse) weiterleiten
     background_tasks.add_task(forward_to_analyse_r, payload)
-    
+
     return {"status": "ok", "message": "Broadcasted to UI, DB, and R"}
 
 
@@ -136,21 +124,20 @@ def event_analysis_completed(payload: dict, background_tasks: BackgroundTasks):
     """
     update_cached_demo_data(payload)
     publish_thread_update(payload)
-    
+
     background_tasks.add_task(save_to_mongodb_background, payload)
-    
     background_tasks.add_task(forward_to_moderation, payload)
-    
+
     return {"status": "ok", "message": "Broadcasted to UI, DB, and Moderation"}
 
 
 @router.post("/demo/publish")
 def publish_demo_update(
-    background_tasks: BackgroundTasks, 
-    payload: Optional[dict] = Body(None)
+    background_tasks: BackgroundTasks,
+    payload: Optional[dict] = Body(None),
 ):
     """
-    Nimmt einen JSON-Payload entgegen. 
+    Nimmt einen JSON-Payload entgegen.
     Wenn keiner gesendet wird, werden Dummy-Daten zum Testen generiert.
     """
     if not payload:
@@ -176,7 +163,6 @@ def publish_demo_update(
         }
 
     update_cached_demo_data(payload)
-
     subscribers = publish_thread_update(payload)
 
     background_tasks.add_task(save_to_mongodb_background, payload)
@@ -185,216 +171,8 @@ def publish_demo_update(
         "status": "ok",
         "subscribers": subscribers,
         "event": payload,
-        "message": "Update gecacht und gestreamt. MongoDB-Speicherung ausstehend."
+        "message": "Update gecacht und gestreamt. MongoDB-Speicherung ausstehend.",
     }
-
-
-# ------------------------------------------------------------------------------
-# Importiert die Professor-Datasets aus den JSON-Dateien in MongoDB.
-# Erstellt Threads und Kommentare in den Collections:
-# - threads
-# - comments
-# ------------------------------------------------------------------------------
-
-@router.post("/import/professor")
-def import_professor_data_into_MongoDB():
-    import_json()
-
-    return {
-        "status": "success",
-        "message": "Professor data imported"
-    }
-# ------------------------------------------------------------------------------
-# Synchronisiert Threads und Kommentare von MongoDB nach Neo4J
-# ------------------------------------------------------------------------------
-@router.post("/sync/graph")
-def sync_MongoDB_NEO4J():
-    return sync_all_threads_to_graph()
-
-# ------------------------------------------------------------------------------
-# Erstellt einen Synchronisationsbericht für MongoDB und Neo4J
-# ------------------------------------------------------------------------------
-@router.get("/report/threads")
-def report_threads_in_MongoDB_and_NEO4J():
-    return get_thread_report()
-
-# ------------------------------------------------------------------------------
-# Prüft, ob als synchronisiert markierte Threads tatsächlich in Neo4j existieren
-# ------------------------------------------------------------------------------
-
-@router.post("/sync/reset-missing-neo4j")
-def reset_missing_neo4j_sync_status():
-    return reset_mongo_sync_status_if_missing_in_neo4j()
-
-
-# ------------------------------------------------------------------------------
-# Erzeugt LLM-Features nur für Professor-Kommentare
-# ------------------------------------------------------------------------------
-@router.post("/llm/analyze-professor")
-def analyze_professor_with_llm():
-    return analyze_professor_with_llm_service()
-
-# ------------------------------------------------------------------------------
-# Importiert den vollständigen Professor-Datensatz mit LLM-Features aus JSON
-# ------------------------------------------------------------------------------
-
-@router.post("/analysis/import-professor-llm")
-def import_professor_llm():
-    return import_professor_llm_dataset()
-
-# ------------------------------------------------------------------------------
-# Erzeugt LLM-Features nur für Bluesky-Kommentare
-# ------------------------------------------------------------------------------
-@router.post("/llm/analyze-bluesky")
-def analyze_bluesky_with_llm():
-    return analyze_bluesky_with_llm_service()
-
-
-# ------------------------------------------------------------------------------
-# Liefert den vollständigen Professor-Datensatz mit LLM-Features für ML-Analyse
-# ------------------------------------------------------------------------------            
-@router.get("/analysis/training/prof-comments/all")
-def get_all_analysis_comments():
-    return get_all_comments_for_analysis()
-
-
-
-# ------------------------------------------------------------------------------
-# Liefert den vollständigen Bluesky Datensatz mit LLM-Features für ML-Analyse
-# ------------------------------------------------------------------------------ 
-
-@router.get("/analysis/bluesky/prediction-data")
-def bluesky_prediction_data():
-    return get_bluesky_comments_for_prediction()
-
-# ------------------------------------------------------------------------------
-# Ergebnisse, die von R-Service an die API zurückgegeben werden
-# ------------------------------------------------------------------------------
-
-class AnalysisResultsPayload(BaseModel):
-
-    bluesky_prediction_comments_results: list[dict[str, Any]] = []
-    bluesky_prediction_thread_results: list[dict[str, Any]] = []
-    bluesky_prediction_user_results: list[dict[str, Any]] = []
-    bluesky_prediction_model_results: list[dict[str, Any]] = []
-    
-    professor_test_comment_results: list[dict[str, Any]] = []
-    professor_test_thread_results: list[dict[str, Any]] = []
-    professor_test_user_results: list[dict[str, Any]] = []
-    professor_test_model_results: list[dict[str, Any]] = []
-    
-#------------------------------------------------------------------------------
-# Speichert die Analyseergebnisse des R-Service in MongoDB
-# ------------------------------------------------------------------------------
- 
-@router.post("/analysis/save-results")
-def save_results(payload: AnalysisResultsPayload):
-    return save_analysis_results(payload.model_dump())
-
-
-
-# ------------------------------------------------------------------------------
-# Importiert die Professor-Datasets aus den JSON-Dateien in MongoDB.
-# Erstellt Threads und Kommentare in den Collections:
-# - threads
-# - comments
-# ------------------------------------------------------------------------------
-
-@router.post("/import/professor")
-def import_professor_data_into_MongoDB():
-    import_json()
-
-    return {
-        "status": "success",
-        "message": "Professor data imported"
-    }
-# ------------------------------------------------------------------------------
-# Synchronisiert Threads und Kommentare von MongoDB nach Neo4J
-# ------------------------------------------------------------------------------
-@router.post("/sync/graph")
-def sync_MongoDB_NEO4J():
-    return sync_all_threads_to_graph()
-
-# ------------------------------------------------------------------------------
-# Erstellt einen Synchronisationsbericht für MongoDB und Neo4J
-# ------------------------------------------------------------------------------
-@router.get("/report/threads")
-def report_threads_in_MongoDB_and_NEO4J():
-    return get_thread_report()
-
-# ------------------------------------------------------------------------------
-# Prüft, ob als synchronisiert markierte Threads tatsächlich in Neo4j existieren
-# ------------------------------------------------------------------------------
-
-@router.post("/sync/reset-missing-neo4j")
-def reset_missing_neo4j_sync_status():
-    return reset_mongo_sync_status_if_missing_in_neo4j()
-
-
-# ------------------------------------------------------------------------------
-# Erzeugt LLM-Features nur für Professor-Kommentare
-# ------------------------------------------------------------------------------
-@router.post("/llm/analyze-professor")
-def analyze_professor_with_llm():
-    return analyze_professor_with_llm_service()
-
-# ------------------------------------------------------------------------------
-# Importiert den vollständigen Professor-Datensatz mit LLM-Features aus JSON
-# ------------------------------------------------------------------------------
-
-@router.post("/analysis/import-professor-llm")
-def import_professor_llm():
-    return import_professor_llm_dataset()
-
-# ------------------------------------------------------------------------------
-# Erzeugt LLM-Features nur für Bluesky-Kommentare
-# ------------------------------------------------------------------------------
-@router.post("/llm/analyze-bluesky")
-def analyze_bluesky_with_llm():
-    return analyze_bluesky_with_llm_service()
-
-
-# ------------------------------------------------------------------------------
-# Liefert den vollständigen Professor-Datensatz mit LLM-Features für ML-Analyse
-# ------------------------------------------------------------------------------            
-@router.get("/analysis/training/prof-comments/all")
-def get_all_analysis_comments():
-    return get_all_comments_for_analysis()
-
-
-
-# ------------------------------------------------------------------------------
-# Liefert den vollständigen Bluesky Datensatz mit LLM-Features für ML-Analyse
-# ------------------------------------------------------------------------------ 
-
-@router.get("/analysis/bluesky/prediction-data")
-def bluesky_prediction_data():
-    return get_bluesky_comments_for_prediction()
-
-# ------------------------------------------------------------------------------
-# Ergebnisse, die von R-Service an die API zurückgegeben werden
-# ------------------------------------------------------------------------------
-
-class AnalysisResultsPayload(BaseModel):
-
-    bluesky_prediction_comments_results: list[dict[str, Any]] = []
-    bluesky_prediction_thread_results: list[dict[str, Any]] = []
-    bluesky_prediction_user_results: list[dict[str, Any]] = []
-    bluesky_prediction_model_results: list[dict[str, Any]] = []
-    
-    professor_test_comment_results: list[dict[str, Any]] = []
-    professor_test_thread_results: list[dict[str, Any]] = []
-    professor_test_user_results: list[dict[str, Any]] = []
-    professor_test_model_results: list[dict[str, Any]] = []
-    
-#------------------------------------------------------------------------------
-# Speichert die Analyseergebnisse des R-Service in MongoDB
-# ------------------------------------------------------------------------------
- 
-@router.post("/analysis/save-results")
-def save_results(payload: AnalysisResultsPayload):
-    return save_analysis_results(payload.model_dump())
-
 
 
 @router.get("/demo-data")
@@ -618,42 +396,3 @@ def read_demo_data():
             }]
         }
     }]
-    
-@router.get("/demo/stream")
-def stream_demo_updates():
-    return StreamingResponse(iter_thread_updates(), media_type="text/event-stream")
-    
-@router.post("/demo/publish")
-def publish_demo_update():
-    payload = {
-        "type": "comment_added",
-        "threadId": 1,
-        "comment": {
-            "id": 999,
-            "author": "Redis Demo",
-            "time": "2026-06-10T12:00:00Z",
-            "text": "Dieser Kommentar wurde über Redis an die offene Dashboard-Sitzung gesendet.",
-            "moderation": "Demo-Event aus dem Redis-SSE-Pfad.",
-            "kpis": [
-                {"name": "Toxizität", "value": 0.18},
-                {"name": "Respekt", "value": 0.22},
-                {"name": "Relevanz", "value": 0.30},
-                {"name": "Klarheit", "value": 0.25},
-                {"name": "Emotionalität", "value": 0.20},
-                {"name": "Sachlichkeit", "value": 0.28},
-            ],
-            "score": 0.24,
-        },
-    }
-
-    subscribers = publish_thread_update(payload)
-
-    return {
-        "status": "ok",
-        "subscribers": subscribers,
-        "event": payload,
-    }
-    
-    
-    
-   
