@@ -4,6 +4,15 @@
 # Diese Datei bündelt alle Konstanten, damit Training, Prediction,
 # Feature Engineering und Speicherung dieselben Parameter verwenden.
 
+
+
+MODERATION_URL <- "http://moderation:8000"
+
+MODERATION_BLUESKY_PREDICTION_ENDPOINT <- paste0(
+  MODERATION_URL,
+  "/moderation/warning"
+)
+
 API_URL <- "http://api:8000"
 
 ANALYSIS_COMMENTS_ENDPOINT <- paste0(API_URL, "/analysis/training/prof-comments/all")

@@ -335,10 +335,69 @@ build_bluesky_result_documents <- function(bluesky_data, pred, predicted_role) {
     )
   )
 }
+
+
+
+
+
+
 #---------------------------------------------------------------------------------------------------------
 # Speichert Bluesky-Predictions getrennt von Trainingsdaten
 #---------------------------------------------------------------------------------------------------------
+
+# Einfache Log-Funktion für Plumber/Docker-Logs
+
+log_info <- function(msg) {
+  message(
+    paste0(
+      "[", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "] ",
+      msg
+    )
+  )
+}
+
+#Diese Hilfsfunktion liest die Antwort von einem HTTP-Request aus.
+parse_response_safely <- function(response) {
+  log_info("Lese HTTP-Response aus.")
+
+  text <- httr::content(response, as = "text", encoding = "UTF-8")
+
+  if (is.null(text) || trimws(text) == "") {
+    log_info("HTTP-Response ist leer.")
+    return(NULL)
+  }
+
+  log_info(paste0("HTTP-Response erhalten. Länge: ", nchar(text), " Zeichen."))
+
+  tryCatch(
+    {
+      parsed <- jsonlite::fromJSON(text, simplifyVector = FALSE)
+      log_info("HTTP-Response konnte als JSON gelesen werden.")
+      parsed
+    },
+    error = function(e) {
+      log_info("HTTP-Response ist kein gültiges JSON. Gebe Text zurück.")
+      text
+    }
+  )
+}
+
+
+
+# Diese Funktion speichert die berechneten Bluesky-Predictions in der API. 
+# Dafür werden Kommentar-, Thread-, User- und Modell-Ergebnisse als Payload 
+# zusammengebaut und per POST an die API geschickt.
+
 save_bluesky_predictions_to_api <- function(comment_results, thread_results, user_results, model_results) {
+
+  log_info("Starte Speichern der Bluesky-Predictions in der API.")
+
+  log_info(paste0(
+    "Payload-Größen: comments=", nrow(comment_results),
+    ", threads=", nrow(thread_results),
+    ", users=", nrow(user_results),
+    ", model_rows=", nrow(model_results)
+  ))
 
   payload <- list(
     bluesky_prediction_comments_results = comment_results,
@@ -347,11 +406,190 @@ save_bluesky_predictions_to_api <- function(comment_results, thread_results, use
     bluesky_prediction_model_results = model_results
   )
 
+  log_info(paste0("Sende POST an API: ", ANALYSIS_SAVE_RESULTS_ENDPOINT))
+
   response <- httr::POST(
     url = ANALYSIS_SAVE_RESULTS_ENDPOINT,
     body = payload,
     encode = "json"
   )
 
-  httr::content(response, as = "parsed")
+  ok <- !httr::http_error(response)
+  status_code <- httr::status_code(response)
+
+  log_info(paste0(
+    "Antwort vom API-Speichern erhalten. HTTP-Status: ",
+    status_code,
+    ", ok=",
+    ok
+  ))
+
+  result <- list(
+    ok = ok,
+    status_code = status_code,
+    body = parse_response_safely(response)
+  )
+
+  if (isTRUE(ok)) {
+    log_info("Bluesky-Predictions wurden erfolgreich in der API gespeichert.")
+  } else {
+    log_info("FEHLER: Bluesky-Predictions konnten nicht erfolgreich in der API gespeichert werden.")
+  }
+
+  result
 }
+
+# Diese Funktion prüft, ob das Speichern der Bluesky-Predictions erfolgreich war. 
+# Wenn das Speichern nicht erfolgreich war, wird der Ablauf mit stop() abgebrochen. 
+# Dadurch wird verhindert, dass fehlerhafte oder nicht gespeicherte Daten 
+# an den Moderation-Service weitergeleitet werden.
+
+assert_bluesky_save_success <- function(save_status) {
+  log_info("Prüfe, ob das Speichern der Bluesky-Predictions erfolgreich war.")
+
+  if (!is.list(save_status) || !isTRUE(save_status$ok)) {
+    log_info(paste0(
+      "FEHLER: Speichern war nicht erfolgreich. HTTP-Status: ",
+      ifelse(is.null(save_status$status_code), "unknown", save_status$status_code)
+    ))
+
+    stop(
+      paste0(
+        "Bluesky-Predictions wurden NICHT erfolgreich in der API gespeichert. ",
+        "HTTP-Status: ",
+        ifelse(is.null(save_status$status_code), "unknown", save_status$status_code),
+        ". Moderation wird deshalb NICHT aufgerufen."
+      )
+    )
+  }
+
+  log_info("Speichern war erfolgreich. Moderation darf gestartet werden.")
+
+  TRUE
+}
+
+# Diese Funktion holt die gespeicherten Bluesky-Prediction-Daten wieder aus der API. 
+
+fetch_bluesky_prediction_json_from_api <- function() {
+  log_info("Lade gespeicherte Bluesky-Prediction-Daten aus der API.")
+
+  log_info(paste0("Sende GET an API: ", ANALYSIS_BLUESKY_ENDPOINT))
+
+  response <- httr::GET(
+    url = ANALYSIS_BLUESKY_ENDPOINT,
+    httr::accept_json()
+  )
+
+  status_code <- httr::status_code(response)
+
+  log_info(paste0("Antwort vom API-GET erhalten. HTTP-Status: ", status_code))
+
+  if (httr::http_error(response)) {
+    log_info("FEHLER: Bluesky-Prediction-JSON konnte nicht aus der API geladen werden.")
+
+    stop(
+      paste0(
+        "Konnte Bluesky-Prediction-JSON nicht aus API laden. HTTP-Status: ",
+        status_code
+      )
+    )
+  }
+
+  json_text <- httr::content(response, as = "text", encoding = "UTF-8")
+
+  if (is.null(json_text) || trimws(json_text) == "") {
+    log_info("FEHLER: API hat leeren JSON-Body geliefert.")
+    stop("API hat leeren JSON-Body für Bluesky-Prediction-Daten geliefert.")
+  }
+
+  log_info(paste0(
+    "Bluesky-Prediction-JSON aus API geladen. Länge: ",
+    nchar(json_text),
+    " Zeichen."
+  ))
+
+  if (!jsonlite::validate(json_text)) {
+    log_info("FEHLER: API hat keinen gültigen JSON-Body geliefert.")
+    stop("API hat keinen gültigen JSON-Body geliefert.")
+  }
+
+  log_info("API-Antwort ist gültiges JSON.")
+
+  json_text
+}
+
+# Diese Funktion sendet das fertige Bluesky-JSON an den Moderation-Service.
+send_bluesky_json_to_moderation <- function(json_text) {
+  log_info("Starte Weiterleitung der Bluesky-Prediction-Daten an Moderation.")
+
+  log_info(paste0(
+    "JSON-Größe für Moderation: ",
+    nchar(json_text),
+    " Zeichen."
+  ))
+
+  log_info(paste0(
+    "Sende POST an Moderation: ",
+    MODERATION_BLUESKY_PREDICTION_ENDPOINT
+  ))
+
+  response <- httr::POST(
+    url = MODERATION_BLUESKY_PREDICTION_ENDPOINT,
+    body = json_text,
+    httr::content_type_json(),
+    httr::accept_json()
+  )
+
+  ok <- !httr::http_error(response)
+  status_code <- httr::status_code(response)
+
+  log_info(paste0(
+    "Antwort von Moderation erhalten. HTTP-Status: ",
+    status_code,
+    ", ok=",
+    ok
+  ))
+
+  result <- list(
+    ok = ok,
+    status_code = status_code,
+    body = parse_response_safely(response)
+  )
+
+  if (!isTRUE(result$ok)) {
+    log_info("FEHLER: Bluesky-JSON konnte nicht erfolgreich an Moderation gesendet werden.")
+
+    stop(
+      paste0(
+        "Bluesky-JSON wurde gespeichert, aber NICHT erfolgreich an Moderation gesendet. ",
+        "HTTP-Status: ",
+        result$status_code
+      )
+    )
+  }
+
+  log_info("Bluesky-JSON wurde erfolgreich an Moderation gesendet.")
+
+  result
+}
+
+
+# Diese Funktion ist die Hauptfunktion für die Weiterleitung an die Moderation. 
+# Sie verbindet die einzelnen Schritte: 
+# 1. Prüfen, ob die Predictions erfolgreich in der API gespeichert wurden. 
+# 2. Die gespeicherten Prediction-Daten wieder aus der API laden. 
+# 3. Die geladenen JSON-Daten an den Moderation-Service senden.
+forward_bluesky_prediction_data_to_moderation <- function(save_status) {
+  log_info("Starte kompletten Weiterleitungs-Ablauf für Bluesky-Predictions.")
+
+  assert_bluesky_save_success(save_status)
+
+  json_text <- fetch_bluesky_prediction_json_from_api()
+
+  moderation_result <- send_bluesky_json_to_moderation(json_text)
+
+  log_info("Weiterleitungs-Ablauf für Bluesky-Predictions erfolgreich abgeschlossen.")
+
+  moderation_result
+}
+
