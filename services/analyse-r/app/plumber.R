@@ -22,6 +22,7 @@ source("toxicity_feature_engineering.R")
 source("lexicon_feature_engineering.R")
 source("context_feature_engineering.R")
 source("data_type_cleaning.R")
+source("Ergebnistabelle.r")
 
 source("analysis_result_storage.R")
 
