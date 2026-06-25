@@ -24,14 +24,13 @@ from .statistics_tools import EvidenceTransformer, PValueCalculator, PValueCombi
 class ShitstormScorer:
     """Berechnet ein Shitstorm-Barometer als Composite Indicator.
 
-    Methodik im Hauptmodell `dimension_combiner="mean"`:
-    1. Pro Indikator wird ein p-Wert berechnet.
-    2. Jeder p-Wert wird in einen Evidenzscore von 0 bis 1 transformiert.
-    3. Innerhalb einer Dimension wird ein hierarchischer Mean gebildet:
-       zuerst Mittelwert je Untergruppe, dann Mittelwert der Untergruppen.
-    4. Die Dimensionen werden theoriegeleitet gewichtet.
-    5. Ein Gate min(Frequenz, Aggression/Toxizität) verhindert hohe Scores
-       bei nur hoher Aktivität ohne negative/aggressive Kommunikation.
+    1. Fensterwerte werden relativ zur bisherigen Thread-Historie geprüft.
+    2. Zusätzlich gibt es absolute Evidenzscores, damit frühe Eskalationen nicht
+       fälschlich auf 0 bleiben, nur weil noch keine drei Vergleichsfenster existieren.
+    3. Pro Dimension wird max(relative Evidenz, absolute Evidenz) verwendet.
+    4. Final gilt: Shitstorm braucht Frequenz UND Aggression. Darum wird der
+       gewichtete Dimensionsscore mit einem weichen Core-Gate sqrt(Frequenz * Aggression)
+       multipliziert.
     """
 
     def __init__(
@@ -59,18 +58,19 @@ class ShitstormScorer:
             current_window_start=current_window_start,
         )
 
-        dimension_results = self._analyze_dimensions(thread_id, metrics)
+        relative_dimension_results = self._analyze_dimensions(thread_id, metrics)
+        absolute_dimension_scores = self._absolute_dimension_scores(metrics)
+        dimension_results = self._merge_relative_and_absolute(
+            relative_dimension_results,
+            absolute_dimension_scores,
+        )
+
         score_raw = self._calculate_weighted_score(dimension_results)
         gate = self._calculate_gate(dimension_results)
-        barometer_score = score_raw * gate
+        barometer_score = min(1.0, score_raw * gate)
         barometer_percent = round(barometer_score * 100, 2)
         warning_level = self.warning_policy.decide(barometer_score, dimension_results)
 
-        # Hybrid-Sicherheitsregel:
-        # Der p-Wert-Score erkennt Auffälligkeiten relativ zur Thread-Historie.
-        # Sehr starke absolute Eskalation soll aber auch dann mindestens als
-        # critical sichtbar werden, wenn einzelne relative Evidenzwerte durch
-        # Gruppierung/Gate konservativ bleiben.
         absolute_critical = self._absolute_critical_override(metrics)
         if absolute_critical:
             barometer_score = max(barometer_score, 0.60)
@@ -99,6 +99,14 @@ class ShitstormScorer:
                 name: round(result.evidence_score, 4)
                 for name, result in dimension_results.items()
             },
+            "dimension_scores_relative": {
+                name: round(result.evidence_score, 4)
+                for name, result in relative_dimension_results.items()
+            },
+            "dimension_scores_absolute": {
+                name: round(value, 4)
+                for name, value in absolute_dimension_scores.items()
+            },
             "dimension_weights": {
                 dimension.name: dimension.weight
                 for dimension in self.dimensions
@@ -110,9 +118,10 @@ class ShitstormScorer:
             "recent_barometer_values": previous_barometer_values,
             "method": {
                 "indicator_p_values": "poisson for count indicators, empirical upper-tail p-values for ratios/scores",
-                "indicator_evidence_transform": "E_i = min(1, -log10(p_i) / 2), full evidence at p <= 0.01",
+                "indicator_evidence_transform": "relative E_i = min(1, -log10(p_i) / 2), full relative evidence at p <= 0.01",
+                "absolute_evidence": "predefined saturation functions per theoretical dimension; calibrate thresholds on labeled validation data",
                 "dimension_combination": self._method_description(),
-                "aggregation": "Score_raw = weighted sum of dimension evidence scores; final score = Score_raw * min(Frequency, Aggression/Toxicity)",
+                "aggregation": "Dimension score = max(relative evidence, absolute evidence); Score_raw = weighted sum; final = Score_raw * sqrt(Frequency * Aggression/Toxicity)",
             },
         }
 
@@ -187,7 +196,6 @@ class ShitstormScorer:
 
     @staticmethod
     def _hierarchical_mean(indicator_results: Dict[str, IndicatorResult]) -> tuple[float, Dict[str, float]]:
-        """Bildet zuerst Mittelwerte pro Untergruppe und dann den Mittelwert der Gruppen."""
         subgroup_values: Dict[str, List[float]] = defaultdict(list)
 
         for result in indicator_results.values():
@@ -218,6 +226,91 @@ class ShitstormScorer:
         return sum(values) / len(values) if values else 0.0
 
     @staticmethod
+    def _clip01(value: float) -> float:
+        return min(1.0, max(0.0, float(value)))
+
+    @classmethod
+    def _sat(cls, value: Any, low: float, high: float) -> float:
+        value = SafeNumber.to_float(value)
+        if high <= low:
+            return 0.0
+        return cls._clip01((value - low) / (high - low))
+
+    @classmethod
+    def _absolute_dimension_scores(cls, metrics: Dict[str, Any]) -> Dict[str, float]:
+        """Absolute Evidenzscores für frühe Fenster und robuste Mindestinterpretation.
+
+        Die Schwellen sind fachliche Startwerte. Für wissenschaftliche Auswertung: 
+        auf gelabelten Threads per ROC/PR-Kurve oder ordinaler Kalibrierung...
+        """
+        frequency = cls._mean([
+            cls._sat(metrics.get("comment_count"), 3, 15),
+            cls._sat(metrics.get("unique_users"), 2, 8),
+            cls._clip01(SafeNumber.to_float(metrics.get("multi_user_ratio"))),
+        ])
+
+        aggression_toxicity = cls._mean([
+            cls._clip01(SafeNumber.to_float(metrics.get("attack_ratio"))),
+            cls._clip01(SafeNumber.to_float(metrics.get("toxic_ratio"))),
+            cls._clip01(SafeNumber.to_float(metrics.get("attack_score_mean_norm"))),
+            cls._clip01(SafeNumber.to_float(metrics.get("toxicity_score_mean_norm"))),
+            cls._sat(metrics.get("negative_word_count_mean"), 0.5, 3.0),
+            cls._clip01(SafeNumber.to_float(metrics.get("insult_ratio"))),
+            cls._clip01(SafeNumber.to_float(metrics.get("swearword_ratio"))),
+            # Weiches ML-Rollensignal, bewusst niedrig indirekt gewichtet durch Mittelwert.
+            cls._clip01(SafeNumber.to_float(metrics.get("attack_probability_mean"))),
+        ])
+
+        dynamics = cls._mean([
+            cls._clip01(SafeNumber.to_float(metrics.get("recent_attack_rate_3_mean"))),
+            cls._clip01(SafeNumber.to_float(metrics.get("recent_attack_rate_5_mean"))),
+            cls._sat(metrics.get("attack_streak_max"), 1, 5),
+            cls._clip01(SafeNumber.to_float(metrics.get("reply_after_attack_ratio"))),
+        ])
+
+        focus_personalization = cls._mean([
+            cls._sat(metrics.get("direct_address_mean"), 0.0, 2.0),
+            cls._sat(metrics.get("accusation_marker_mean"), 0.0, 1.5),
+            cls._sat(metrics.get("mockery_marker_mean"), 0.0, 1.5),
+            cls._clip01(SafeNumber.to_float(metrics.get("target_recently_attacked_ratio"))),
+        ])
+
+        return {
+            "frequency": frequency,
+            "aggression_toxicity": aggression_toxicity,
+            "dynamics": dynamics,
+            "focus_personalization": focus_personalization,
+        }
+
+    @staticmethod
+    def _merge_relative_and_absolute(
+        relative_results: Dict[str, DimensionResult],
+        absolute_scores: Dict[str, float],
+    ) -> Dict[str, DimensionResult]:
+        merged: Dict[str, DimensionResult] = {}
+
+        for name, result in relative_results.items():
+            absolute_score = absolute_scores.get(name, 0.0)
+            evidence_score = max(result.evidence_score, absolute_score)
+
+            merged[name] = DimensionResult(
+                name=result.name,
+                label=result.label,
+                weight=result.weight,
+                p_value=result.p_value,
+                evidence_score=evidence_score,
+                combiner=f"{result.combiner}+absolute_max",
+                indicators=result.indicators,
+                subgroup_scores={
+                    **result.subgroup_scores,
+                    "relative_model": result.evidence_score,
+                    "absolute_rule": absolute_score,
+                },
+            )
+
+        return merged
+
+    @staticmethod
     def _calculate_weighted_score(dimension_results: Dict[str, DimensionResult]) -> float:
         return sum(
             result.weight * result.evidence_score
@@ -226,22 +319,17 @@ class ShitstormScorer:
 
     @staticmethod
     def _calculate_gate(dimension_results: Dict[str, DimensionResult]) -> float:
-        frequency = dimension_results["frequency"].evidence_score
-        aggression = dimension_results["aggression_toxicity"].evidence_score
-        return min(frequency, aggression)
+        frequency = max(0.0, dimension_results["frequency"].evidence_score)
+        aggression = max(0.0, dimension_results["aggression_toxicity"].evidence_score)
+        return math.sqrt(frequency * aggression)
 
     @staticmethod
     def _absolute_critical_override(metrics: Dict[str, Any]) -> bool:
-        """Absolute Mindestregel für sehr starke Eskalationsfenster.
-
-        Diese Regel ergänzt den relativen p-Wert-Score. Sie verhindert, dass ein
-        offensichtlich kritisches Fenster nur deshalb niedrig bleibt, weil der
-        Composite Score sehr konservativ aggregiert.
-        """
         return (
             SafeNumber.to_float(metrics.get("comment_count")) >= 10
+            and SafeNumber.to_float(metrics.get("unique_users")) >= 4
             and SafeNumber.to_float(metrics.get("attack_ratio")) >= 0.70
-            and SafeNumber.to_float(metrics.get("toxic_ratio")) >= 0.70
+            and SafeNumber.to_float(metrics.get("toxic_ratio")) >= 0.60
             and SafeNumber.to_float(metrics.get("attack_streak_max")) >= 5
         )
 
