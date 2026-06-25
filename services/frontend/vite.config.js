@@ -5,8 +5,9 @@ export default defineConfig({
   plugins: [vue()],
   server: {
     proxy: {
-      '/api': {
-        target: 'http://api:8000',
+      '/api': { target: 'http://api:8000', changeOrigin: true },
+      '/evaluate-thread': { 
+        target: 'http://moderation:8000',
         changeOrigin: true
       }
     }

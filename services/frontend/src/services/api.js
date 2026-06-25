@@ -1,17 +1,10 @@
-import axios from 'axios'
+import axios from 'axios';
+const apiClient = axios.create({ baseURL: '/' });
 
-// Basis-Konfiguration für unser Backend
-const apiClient = axios.create({
-  baseURL: 'http://localhost:8000',
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  timeout: 10000 // Timeout nach 10 Sekunden
-})
-
-// Hier exportieren wir alle unsere API-Aufrufe
 export default {
-  getDemoData() {
-    return apiClient.get('/demo-data')
+  getEvaluation(threadId, platform, sourceFile) {
+    return apiClient.get(`/evaluate-thread/${threadId}`, { 
+      params: { platform, source_file: sourceFile } 
+    });
   }
 }
