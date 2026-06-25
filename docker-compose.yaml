@@ -84,20 +84,6 @@ services:
       API_URL: http://api:8000
     restart: unless-stopped
 
-  analyse-py:
-    build: ./services/analyse-py
-    container_name: groupproject_analyse-py
-    ports:
-      - "8010:8000"
-    depends_on:
-      - api
-      - llm-service
-    environment:
-      API_URL: http://api:8000
-      ANALYSE_R_URL: http://analyse-r:8000
-      LLM_SERVICE_URL: http://llm-service:8011
-    restart: unless-stopped
-
   llm-service:
     build: ./services/LLM_service
     container_name: groupproject_llm_service
