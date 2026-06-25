@@ -41,7 +41,7 @@ def evaluate_thread_from_api(
 
         return {
             "status": "success",
-            "message": "Thread wurde abgerufen und Evaluation wurde direkt ausgeführt.",
+            "message": "Thread wurde abgerufen und mit dem neuen Standardvariablen-Format evaluiert.",
             "thread_id": thread_id,
             "platform": platform,
             "summary": evaluation_result["summary"],

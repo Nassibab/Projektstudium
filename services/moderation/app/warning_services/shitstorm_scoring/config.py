@@ -1,10 +1,13 @@
 """Konfiguration der Dimensionen und Indikatoren.
 
-Hier liegen die fachlichen Entscheidungen:
-- Welche Dimensionen gibt es?
-- Welche Variablen gehören zu welcher Dimension?
-- Welche Untergruppen werden für den hierarchischen Mean verwendet?
-- Wie stark wird jede Dimension gewichtet?
+Die Dimensionen bilden ein theoretisches Shitstorm-Konstrukt ab:
+1. Frequenz 
+2. Aggression / Toxizität / Negativität
+3. Eskalationsdynamik
+4. Fokus / Personalisierung
+
+ Die ML-Rollenwahrscheinlichkeiten werden hier als weiche Zusatzsignale genutzt,
+nicht als Ersatz für die LLM-/Regelmetriken. 
 """
 
 from __future__ import annotations
@@ -16,7 +19,7 @@ from .models import DimensionSpec, IndicatorSpec
 DEFAULT_DIMENSIONS: List[DimensionSpec] = [
     DimensionSpec(
         name="frequency",
-        label="Frequenz / Aktivität",
+        label="Frequenz / Mobilisierung",
         weight=0.25,
         indicators=[
             IndicatorSpec(
@@ -31,24 +34,28 @@ DEFAULT_DIMENSIONS: List[DimensionSpec] = [
                 "Anzahl unterschiedlicher Nutzer im aktuellen 5-Minuten-Fenster",
                 group="participation",
             ),
+            IndicatorSpec(
+                "multi_user_ratio",
+                "empirical",
+                "Anteil nicht-dominanter Beteiligung; hoch bedeutet eher kollektive Mobilisierung als Einzelspam",
+                group="participation",
+            ),
         ],
     ),
     DimensionSpec(
         name="aggression_toxicity",
         label="Aggression / Toxizität / Negativität",
-        weight=0.35,
+        weight=0.40,
         indicators=[
-            # Untergruppe: direkte Angriffe
             IndicatorSpec("attack_count", "poisson", "Anzahl angreifender Kommentare", group="attack"),
             IndicatorSpec("attack_ratio", "empirical", "Anteil angreifender Kommentare", group="attack"),
-            IndicatorSpec("attack_score_mean", "empirical", "Mittlerer Angriffsscore", group="attack"),
+            IndicatorSpec("attack_score_mean_norm", "empirical", "Normierter mittlerer Angriffsscore", group="attack"),
+            IndicatorSpec("attack_probability_mean", "empirical", "Mittlere Rollenwahrscheinlichkeit für Attacke", group="attack_soft_role"),
 
-            # Untergruppe: Toxizität
-            IndicatorSpec("toxic_count", "poisson", "Anzahl toxischer Kommentare", group="toxicity"),
+            IndicatorSpec("toxic_count", "poisson", "Anzahl toxischer Kommentare, toxicity_score >= 3", group="toxicity"),
             IndicatorSpec("toxic_ratio", "empirical", "Anteil toxischer Kommentare", group="toxicity"),
-            IndicatorSpec("toxicity_score_mean", "empirical", "Mittlerer Toxizitätsscore", group="toxicity"),
+            IndicatorSpec("toxicity_score_mean_norm", "empirical", "Normierter mittlerer Toxizitätsscore", group="toxicity"),
 
-            # Untergruppe: negative Sprache / Beleidigungen
             IndicatorSpec("insult_comment_count", "poisson", "Anzahl Kommentare mit Beleidigungen", group="negative_language"),
             IndicatorSpec("insult_ratio", "empirical", "Anteil Kommentare mit Beleidigungen", group="negative_language"),
             IndicatorSpec("swearword_comment_count", "poisson", "Anzahl Kommentare mit Schimpfwörtern", group="negative_language"),
@@ -59,7 +66,7 @@ DEFAULT_DIMENSIONS: List[DimensionSpec] = [
     DimensionSpec(
         name="dynamics",
         label="Dynamik / Eskalationsverlauf",
-        weight=0.25,
+        weight=0.20,
         indicators=[
             IndicatorSpec(
                 "recent_attack_rate_3_mean",

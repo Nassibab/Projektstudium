@@ -53,7 +53,7 @@ class ModerationWarningService:
 
         return {
             "status": "success",
-            "comment_id": comment.get("id"),
+            "comment_id": comment.get("comment_id"),
             "thread_id": thread_id,
             "current_window_metrics": metrics,
             "shitstorm_prediction": score_result,
