@@ -421,3 +421,206 @@ def save_analysis_results(payload: dict):
         "professor_test_user_results": len(professor_test_user_results),
         "professor_test_model_results": len(professor_test_model_results)
     }
+
+
+
+#------------------------------------------------------------------------------------
+# ladet nur Kommentare mit LLM-Features zu genau einem Bluesky-Thread 
+#------------------------------------------------------------------------------------
+
+def get_bluesky_thread_for_prediction(thread_id: str):
+    thread_id_values = [thread_id]
+
+    # Falls thread_id in Mongo als Zahl gespeichert wurde
+    if str(thread_id).isdigit():
+        thread_id_values.append(int(thread_id))
+
+    thread = threads_collection.find_one(
+        {
+            "source_file": "bluesky",
+            "thread_id": {"$in": thread_id_values},
+        },
+        {"_id": 0},
+    )
+
+    comments = list(
+        comments_collection.find(
+            {
+                "source_file": "bluesky",
+                "thread_id": {"$in": thread_id_values},
+            },
+            {"_id": 0},
+        ).sort("created_at", 1)
+    )
+
+    if not thread and not comments:
+        return None
+
+    llm_results = list(
+        mongo.collection("llm_analysis_results").find(
+            {
+                "source_file": "bluesky",
+                "thread_id": {"$in": [str(v) for v in thread_id_values]},
+            },
+            {"_id": 0},
+        )
+    )
+
+    llm_by_comment_id = {
+        str(r.get("comment_id")): r
+        for r in llm_results
+    }
+
+    result_comments = []
+
+    for c in comments:
+        comment_id = str(c.get("comment_id"))
+        llm = llm_by_comment_id.get(comment_id, {})
+
+        result_comments.append({
+            "comment_id": c.get("comment_id"),
+            "thread_id": c.get("thread_id"),
+            "source_file": c.get("source_file"),
+            "parent_id": c.get("parent_id"),
+            "login": c.get("user"),
+            "text": c.get("text"),
+            "created_at": c.get("created_at"),
+            "source_platform": c.get("source_platform"),
+            "source_type": c.get("source_type"),
+
+            "irony": llm.get("irony"),
+            "attack_score": llm.get("attack_score"),
+            "toxicity_score": llm.get("toxicity_score"),
+            "swearword_count": llm.get("swearword_count"),
+            "negative_word_count": llm.get("negative_word_count"),
+            "insult_count": llm.get("insult_count"),
+            "direct_address_count": llm.get("direct_address_count"),
+            "imperative_count": llm.get("imperative_count"),
+            "accusation_marker_count": llm.get("accusation_marker_count"),
+            "mockery_marker_count": llm.get("mockery_marker_count"),
+            "is_attacking": llm.get("is_attacking"),
+        })
+
+    return {
+        "thread": {
+            "thread_id": thread.get("thread_id") if thread else thread_id,
+            "source_file": thread.get("source_file") if thread else "bluesky",
+            "source_platform": thread.get("source_platform") if thread else "bluesky",
+            "source_type": thread.get("source_type") if thread else None,
+            "title": thread.get("title") if thread else None,
+            "comments_count": thread.get("comments_count") if thread else len(result_comments),
+        },
+        "comments_count": len(result_comments),
+        "comments": result_comments,
+    }
+
+
+
+
+
+
+
+
+
+
+#------------------------------------------------------------------------------------
+# ladet nur Kommentare mit LLM-Features zu genau einem Professor-Thread 
+#------------------------------------------------------------------------------------
+
+
+def get_professor_comments_for_analysis_by_thread(
+    thread_id: str,
+    source_file: str | None = None,
+):
+    thread_id_values = [thread_id]
+
+    if str(thread_id).isdigit():
+        thread_id_values.append(int(thread_id))
+
+    comment_query = {
+        "source_platform": "professor_dataset",
+        "thread_id": {"$in": thread_id_values},
+    }
+
+    thread_query = {
+        "source_platform": "professor_dataset",
+        "thread_id": {"$in": thread_id_values},
+    }
+
+    llm_query = {
+        "thread_id": {"$in": [str(v) for v in thread_id_values]},
+    }
+
+    if source_file:
+        comment_query["source_file"] = source_file
+        thread_query["source_file"] = source_file
+        llm_query["source_file"] = source_file
+
+    comments = list(comments_collection.find(comment_query, {"_id": 0}).sort("created_at", 1))
+    threads = list(threads_collection.find(thread_query, {"_id": 0}))
+    llm_results = list(mongo.collection("llm_analysis_results").find(llm_query, {"_id": 0}))
+
+    if not comments:
+        return None
+
+    threads_by_key = {
+        (str(t.get("source_file")), str(t.get("thread_id"))): t
+        for t in threads
+    }
+
+    llm_by_key = {
+        (
+            str(r.get("source_file")),
+            str(r.get("thread_id")),
+            str(r.get("comment_id")),
+        ): r
+        for r in llm_results
+    }
+
+    result = []
+
+    for c in comments:
+        key_thread = (str(c.get("source_file")), str(c.get("thread_id")))
+        key_comment = (
+            str(c.get("source_file")),
+            str(c.get("thread_id")),
+            str(c.get("comment_id")),
+        )
+
+        thread = threads_by_key.get(key_thread, {})
+        llm = llm_by_key.get(key_comment, {})
+
+        result.append({
+            "comment_id": c.get("comment_id"),
+            "thread_id": c.get("thread_id"),
+            "source_file": c.get("source_file"),
+            "parent_id": c.get("parent_id"),
+            "login": c.get("user"),
+            "text": c.get("text"),
+            "created_at": c.get("created_at"),
+            "source_platform": c.get("source_platform"),
+            "source_type": c.get("source_type"),
+            "synthetic": c.get("synthetic"),
+            "synthetic_role": c.get("synthetic_role"),
+            "toxicity_level": c.get("toxicity_level"),
+            "target_login": c.get("target_user"),
+
+            "thread_title": thread.get("title"),
+            "comments_count": thread.get("comments_count"),
+            "scenario_type": thread.get("scenario_type"),
+            "label_shitstorm": thread.get("label_shitstorm"),
+
+            "irony": llm.get("irony"),
+            "attack_score": llm.get("attack_score"),
+            "toxicity_score": llm.get("toxicity_score"),
+            "swearword_count": llm.get("swearword_count"),
+            "negative_word_count": llm.get("negative_word_count"),
+            "insult_count": llm.get("insult_count"),
+            "direct_address_count": llm.get("direct_address_count"),
+            "imperative_count": llm.get("imperative_count"),
+            "accusation_marker_count": llm.get("accusation_marker_count"),
+            "mockery_marker_count": llm.get("mockery_marker_count"),
+            "is_attacking": llm.get("is_attacking"),
+        })
+
+    return result

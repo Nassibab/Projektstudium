@@ -18,7 +18,9 @@ from app.importers.professor_json_importer import import_json
 from app.database_services.mongo_data_service import (
      get_all_comments_for_analysis,
      save_analysis_results,
-     get_bluesky_comments_for_prediction
+     get_bluesky_comments_for_prediction,
+     get_bluesky_thread_for_prediction,
+     get_professor_comments_for_analysis_by_thread
 )
 from app.importers.professor_llm_json_importer import import_professor_llm_dataset
 from app.services.redis_events import iter_thread_updates, publish_thread_update
@@ -179,6 +181,63 @@ def get_all_analysis_comments():
 @router.get("/analysis/bluesky/prediction-data")
 def bluesky_prediction_data():
     return get_bluesky_comments_for_prediction()
+
+
+
+
+#------------------------------------------------------------------------------------
+# ladet nur Kommentare mit LLM-Features zu genau einem Bluesky-Thread 
+#------------------------------------------------------------------------------------
+
+@router.get("/analysis/bluesky/prediction-data/{thread_id}")
+def bluesky_prediction_data_for_thread(thread_id: str):
+    result = get_bluesky_thread_for_prediction(thread_id)
+
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Kein Bluesky Thread mit thread_id={thread_id} gefunden",
+        )
+
+    return result
+
+
+
+
+
+#------------------------------------------------------------------------------------
+# ladet nur Kommentare mit LLM-Features zu genau einem Professor-Thread 
+#------------------------------------------------------------------------------------
+
+
+@router.get("/analysis/training/prof-comments/thread/{thread_id}")
+def get_professor_analysis_comments_by_thread(
+    thread_id: str,
+    source_file: str | None = Query(default=None),
+):
+    result = get_professor_comments_for_analysis_by_thread(
+        thread_id=thread_id,
+        source_file=source_file,
+    )
+
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Kein Professor-Thread mit thread_id={thread_id} gefunden",
+        )
+
+    return result
+
+
+
+
+
+
+
+
+
+
+
 
 # ------------------------------------------------------------------------------
 # Ergebnisse, die von R-Service an die API zurückgegeben werden
