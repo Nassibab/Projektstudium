@@ -255,3 +255,18 @@ class ShitstormScorer:
         total_weight = sum(dimension.weight for dimension in dimensions)
         if not math.isclose(total_weight, 1.0, abs_tol=1e-9):
             raise ValueError(f"Dimension weights must sum to 1.0, got {total_weight}.")
+
+    def calculate_batch_score(self, metrics: Dict[str, Any]) -> Dict[str, Any]:
+        """Berechnet Score ohne Zeitfenster-Historie (für Batch-Warmup)."""
+        # Wir berechnen die Dimensionen ohne die history-Methoden zu nutzen
+        dimension_results = self._analyze_dimensions("batch", metrics)
+        score_raw = self._calculate_weighted_score(dimension_results)
+        gate = self._calculate_gate(dimension_results)
+        
+        barometer_score = score_raw * gate
+        
+        return {
+            "barometer_score_0_1": round(barometer_score, 4),
+            "warning_level": self.warning_policy.decide(barometer_score, dimension_results),
+            "dimension_scores": {n: round(r.evidence_score, 4) for n, r in dimension_results.items()},
+        }

@@ -1,17 +1,16 @@
 import axios from 'axios'
 
-// Basis-Konfiguration für unser Backend
 const apiClient = axios.create({
-  baseURL: 'http://localhost:8000',
+  baseURL: '/api', // Nutzt den Proxy aus der vite.config.js
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 10000 // Timeout nach 10 Sekunden
+  timeout: 10000
 })
 
-// Hier exportieren wir alle unsere API-Aufrufe
 export default {
-  getDemoData() {
-    return apiClient.get('/demo-data')
+  // Lade die ECHTEN letzten 2 Threads aus der DB
+  getLatestThreads() {
+    return apiClient.get('/threads/latest')
   }
 }

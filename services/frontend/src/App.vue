@@ -2,10 +2,7 @@
   <div class="app dark-theme">
     <div class="page">
       <header class="topbar">
-        <h1>Moderations-Dashboard Demo</h1>
-        <button class="debug-btn" @click="triggerPublish" title="Call /demo/publish">
-          Debug Publish
-        </button>
+        <h1>Moderations-Dashboard</h1>
       </header>
 
       <section v-if="currentComment" class="dashboard">
@@ -18,7 +15,7 @@
           </div>
 
           <div class="score-card" :class="scoreDetails.class">
-            <span class="score-value">{{ currentComment.score.toFixed(2) }}</span>
+            <span class="score-value">{{ safeScore(currentComment.score) }}</span>
             <span class="score-label">{{ scoreDetails.label }}</span>
           </div>
 
@@ -140,14 +137,14 @@
             <ul class="kpi-list">
               <li v-for="kpi in currentComment.kpis" :key="kpi.name">
                 <span>{{ kpi.name }}</span>
-                <strong>{{ kpi.value.toFixed(2) }}</strong>
+                <strong>{{ safeKpiValue(kpi.value) }}</strong>
               </li>
             </ul>
           </div>
         </div>
       </section>
 
-      <section v-if="demoData" class="bottom-section">
+      <section v-if="threadList.length" class="bottom-section">
         
         <div class="panel thread-panel-left">
           <h3>Aktive Threads</h3>
@@ -189,7 +186,7 @@
               </div>
               
               <div class="comment-score" :class="getScoreDetails(comment.score).class">
-                <strong>{{ getScoreDetails(comment.score).label }}:</strong> {{ comment.score.toFixed(2) }}
+                <strong>{{ getScoreDetails(comment.score).label }}:</strong> {{ safeScore(comment.score) }}
               </div>
               
               <p>{{ comment.text }}</p>
@@ -202,7 +199,7 @@
       </section>
 
       <div v-else class="loading">
-        <p>Lade Demo-Daten…</p>
+        <p>Warte auf reale Moderations-Daten…</p>
       </div>
     </div>
   </div>
@@ -215,42 +212,36 @@ export default {
   name: 'DashboardView',
   data() {
     return {
-      demoData: null,
       selectedThreadId: null,
       selectedCommentId: null,
       eventSource: null,
+      liveEvent: null,
+      initialThreads: [],
     }
   },
   computed: {
-    // Unterstützt sowohl ein einzelnes thread-Objekt als auch ein threads-Array (falls die API erweitert wird)
     threadList() {
-      if (!this.demoData) return []
-
-      if (Array.isArray(this.demoData)) {
-        return this.demoData.map((item, index) => {
-          const thread = item.thread || item
-          return {
-            ...thread,
-            id: thread.id != null ? thread.id : index,
-          }
+      const liveThreads = []
+      if (this.liveEvent?.thread) {
+        liveThreads.push({
+          ...this.liveEvent.thread,
+          id: this.liveEvent.thread.id != null ? this.liveEvent.thread.id : this.liveEvent.threadId,
         })
       }
 
-      if (this.demoData.threads && Array.isArray(this.demoData.threads)) {
-        return this.demoData.threads.map((thread, index) => ({
-          ...thread,
-          id: thread.id != null ? thread.id : index,
-        }))
-      }
+      const dbThreads = this.initialThreads.map(thread => ({
+        ...thread,
+        id: thread.id != null ? thread.id : 0,
+      }))
 
-      if (this.demoData.thread) {
-        return [{
-          ...this.demoData.thread,
-          id: this.demoData.thread.id != null ? this.demoData.thread.id : 0,
-        }]
-      }
+      const merged = [...liveThreads]
+      dbThreads.forEach(dbThread => {
+        if (!merged.find(t => t.id === dbThread.id)) {
+          merged.push(dbThread)
+        }
+      })
 
-      return []
+      return merged
     },
     currentThread() {
       if (!this.threadList.length) return null
@@ -311,33 +302,23 @@ export default {
     }
   },
   methods: {
-    async triggerPublish() {
+    async fetchLatestThreads() {
       try {
-        await fetch('http://localhost:8000/demo/publish', {
-          method: 'POST'
-        })
-        console.log('Publish endpoint triggered successfully')
-      } catch (error) {
-        console.error('Failed to trigger publish endpoint:', error)
-      }
-    },
-
-    async fetchDemoData() {
-      try {
-        const response = await api.getDemoData()
-        this.demoData = response.data
-
-        if (this.threadList.length > 0) {
-          this.selectedThreadId = this.threadList[0].id || null
+        const response = await api.getLatestThreads()
+        this.initialThreads = response.data
+        
+        // Wenn Daten da sind, wähle direkt den ersten Thread aus
+        if (this.initialThreads.length > 0) {
+          this.selectThread(this.initialThreads[0])
         }
       } catch (error) {
-        console.error('API Error:', error)
+        console.error('Fehler beim Laden der echten Threads:', error)
       }
     },
-    connectDemoStream() {
+    connectLiveStream() {
       if (this.eventSource) return
 
-      this.eventSource = new EventSource('http://localhost:8000/demo/stream')
+      this.eventSource = new EventSource('/api/events/stream')
 
       this.eventSource.onmessage = (event) => {
         try {
@@ -352,25 +333,73 @@ export default {
         console.warn('SSE connection lost, retrying...')
       }
     },
+    normalizeKpis(kpis) {
+      if (!Array.isArray(kpis)) return []
+      return kpis.map((kpi, index) => ({
+        name: kpi.name || kpi.label || `KPI ${index + 1}`,
+        value: typeof kpi.value === 'number' ? kpi.value : 0,
+      }))
+    },
+    normalizeScore(comment, payload) {
+      if (typeof comment.score === 'number') return comment.score
+      if (typeof comment.shitstorm_score === 'number') return comment.shitstorm_score / 100
+
+      const moderationResult = payload.moderation_result || payload.moderationResult || {}
+      const prediction = moderationResult.shitstorm_prediction || moderationResult.score_result || {}
+      if (typeof prediction.shitstorm_barometer === 'number') {
+        return prediction.shitstorm_barometer / 100
+      }
+
+      return 0
+    },
+    normalizePayload(payload) {
+      const sourceComment = payload?.comment || payload?.data || payload?.result || payload || {}
+      const comment = sourceComment && typeof sourceComment === 'object' ? sourceComment : {}
+
+      const normalizedComment = {
+        ...comment,
+        id: comment.id ?? comment.comment_id ?? payload?.comment_id ?? `${Date.now()}`,
+        author: comment.author ?? comment.user ?? comment.username ?? 'Unbekannt',
+        time: comment.time ?? comment.created_at ?? comment.timestamp ?? new Date().toISOString(),
+        text: comment.text ?? comment.comment_text ?? '',
+        moderation: comment.moderation ?? comment.warning_level ?? comment.moderation_level ?? 'unknown',
+        score: this.normalizeScore(comment, payload),
+        kpis: this.normalizeKpis(comment.kpis ?? comment.metrics ?? payload?.kpis ?? []),
+      }
+
+      if (!normalizedComment.kpis.length) {
+        normalizedComment.kpis = [
+          { name: 'Score', value: normalizedComment.score },
+        ]
+      }
+
+      const threadId = payload?.threadId ?? payload?.thread_id ?? comment.thread_id ?? comment.threadId ?? `thread-${normalizedComment.id}`
+      const threadTitle = payload?.threadTitle ?? payload?.thread_title ?? payload?.thread?.title ?? payload?.title ?? 'Live moderation event'
+      const threadText = payload?.threadText ?? payload?.thread_text ?? payload?.thread?.text ?? comment.thread_text ?? normalizedComment.text
+
+      return {
+        threadId,
+        threadTitle,
+        threadText,
+        comment: normalizedComment,
+        thread: {
+          id: threadId,
+          title: threadTitle,
+          text: threadText,
+          comments: [normalizedComment],
+        },
+      }
+    },
     applyThreadUpdate(payload) {
-      if (!payload || !this.demoData || payload.type !== 'comment_added') return
+      if (!payload) return
 
-      if (!Array.isArray(this.demoData)) return
+      const event = this.normalizePayload(payload)
+      if (!event?.comment) return
 
-      this.demoData = this.demoData.map((item) => {
-        if (!item.thread || item.thread.id !== payload.threadId) return item
+      this.liveEvent = event
 
-        return {
-          ...item,
-          thread: {
-            ...item.thread,
-            comments: [...(item.thread.comments || []), payload.comment],
-          },
-        }
-      })
-
-      this.selectedThreadId = payload.threadId
-      this.selectedCommentId = payload.comment?.id || null
+      this.selectedThreadId = event.threadId
+      this.selectedCommentId = event.comment.id || null
     },
     selectThread(thread) {
       this.selectedThreadId = thread.id;
@@ -378,10 +407,22 @@ export default {
       // damit stattdessen der erste Kommentar des neuen Threads geladen wird
       this.selectedCommentId = null; 
     },
+    safeScore(score) {
+      const numericScore = Number(score)
+      if (!Number.isFinite(numericScore)) return '0.00'
+      return numericScore.toFixed(2)
+    },
+    safeKpiValue(value) {
+      const numericValue = Number(value)
+      if (!Number.isFinite(numericValue)) return '0.00'
+      return numericValue.toFixed(2)
+    },
     getScoreDetails(score) {
-      if (score >= 0.75) return { class: 'score-rot', label: 'Kritisch' }
-      if (score >= 0.50) return { class: 'score-orange', label: 'Eskalation' }
-      if (score >= 0.25) return { class: 'score-gelb', label: 'Frühwarnung' }
+      const numericScore = Number(score)
+      if (!Number.isFinite(numericScore)) return { class: 'score-gruen', label: 'Normal' }
+      if (numericScore >= 0.75) return { class: 'score-rot', label: 'Kritisch' }
+      if (numericScore >= 0.50) return { class: 'score-orange', label: 'Eskalation' }
+      if (numericScore >= 0.25) return { class: 'score-gelb', label: 'Frühwarnung' }
       return { class: 'score-gruen', label: 'Normal' }
     },
     // Holt den Score des neuesten Kommentars des Threads
@@ -435,8 +476,8 @@ export default {
     }
   },
   mounted() {
-    this.fetchDemoData()
-    this.connectDemoStream()
+    this.fetchLatestThreads()
+    this.connectLiveStream()
   },
   beforeUnmount() {
     if (this.eventSource) {

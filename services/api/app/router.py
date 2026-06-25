@@ -1,3 +1,4 @@
+import json
 import requests
 from typing import Any, Optional
 
@@ -13,7 +14,6 @@ from app.database_services.mongo_data_service import (
 from app.db.mongo import MongoDB
 from app.importers.professor_json_importer import import_json
 from app.importers.professor_llm_json_importer import import_professor_llm_dataset
-from app.services.demo_cache import update_cached_demo_data
 from app.services.llm_analysis_service import (
     analyze_bluesky_with_llm_service,
     analyze_professor_with_llm_service,
@@ -22,11 +22,15 @@ from app.services.mongodb_graph_sync import (
     reset_mongo_sync_status_if_missing_in_neo4j,
     sync_all_threads_to_graph,
 )
-from app.services.redis_events import iter_thread_updates, publish_thread_update
+from app.services.redis_events import (
+    iter_thread_updates, 
+    publish_thread_update, 
+    set_cached_threads, 
+    get_cached_threads
+)
 from app.services.report_service import get_thread_report
 
 router = APIRouter()
-
 
 try:
     mongo_db = MongoDB()
@@ -34,6 +38,100 @@ try:
 except Exception as e:
     print(f"Warnung: MongoDB konnte beim Start nicht verbunden werden: {e}")
     comments_collection = None
+
+
+def _get_frontend_comment_from_moderation(comment: dict) -> dict:
+    payload = dict(comment)
+    if payload.get("id") is None and payload.get("comment_id") is not None:
+        payload["id"] = payload["comment_id"]
+    if payload.get("thread_id") is None and payload.get("threadId") is not None:
+        payload["thread_id"] = payload["threadId"]
+
+    try:
+        response = requests.post("http://moderation:8000/moderate/batch", json=payload, timeout=10)
+        response.raise_for_status()
+        result = response.json()
+        if isinstance(result, dict) and isinstance(result.get("comment"), dict):
+            return result["comment"]
+    except Exception as exc:
+        print(f"Cold-start moderation failed for comment {payload.get('id')}: {exc}")
+
+    moderation_result = comment.get("moderation_result")
+    if isinstance(moderation_result, dict):
+        warning_level = moderation_result.get("warning_level", moderation_result.get("moderation", "Unbekannt"))
+        if "shitstorm_barometer" in moderation_result:
+            score_value = round(float(moderation_result.get("shitstorm_barometer", 0.0)) / 100, 4)
+        else:
+            score_value = moderation_result.get("barometer_score_0_1", moderation_result.get("score", 0.0))
+        dimension_scores = moderation_result.get("dimension_scores", moderation_result.get("kpis", {}))
+        kpis = [{"name": k, "value": v} for k, v in dimension_scores.items()]
+        return {
+            "id": comment.get("comment_id") or comment.get("id"),
+            "author": comment.get("author") or comment.get("user") or "Unbekannt",
+            "time": comment.get("created_at") or comment.get("time") or comment.get("timestamp"),
+            "text": comment.get("text", ""),
+            "moderation": warning_level,
+            "score": score_value,
+            "kpis": kpis,
+            "countermeasures": {},
+            "counter_speech": {"should_generate": False, "generated_text": None},
+        }
+
+    return {
+        "id": payload.get("id") or payload.get("comment_id"),
+        "author": payload.get("author") or payload.get("user") or "Unbekannt",
+        "time": payload.get("created_at") or payload.get("time") or payload.get("timestamp"),
+        "text": payload.get("text", ""),
+        "moderation": "Unbekannt",
+        "score": 0.0,
+        "kpis": [],
+        "countermeasures": {},
+        "counter_speech": {"should_generate": False, "generated_text": None},
+    }
+
+
+def warmup_redis_cache():
+    if comments_collection is None:
+        return
+
+    print("Lade die neuesten 2 Threads aus MongoDB in den Redis-Cache...")
+    
+    # 1. Hole die letzten 2 Threads
+    latest_threads_cursor = mongo_db.collection("threads").find({}, {"_id": 0}).sort("_id", -1).limit(2)
+    latest_threads = list(latest_threads_cursor)
+    result = []
+
+    for thread in latest_threads:
+        thread_id = thread.get("thread_id")
+        comments = list(comments_collection.find({"thread_id": thread_id}, {"_id": 0}).sort("created_at", 1))
+        
+        formatted_comments = []
+        for c in comments:
+            frontend_comment = _get_frontend_comment_from_moderation(c)
+
+            formatted_comments.append({
+                "id": frontend_comment.get("id") or c.get("comment_id") or c.get("id"),
+                "author": frontend_comment.get("author") or c.get("user") or "Unbekannt",
+                "time": frontend_comment.get("time") or c.get("created_at"),
+                "text": frontend_comment.get("text", c.get("text", "")),
+                "moderation": frontend_comment.get("moderation", "Unbekannt"),
+                "score": frontend_comment.get("score", 0.0),
+                "kpis": frontend_comment.get("kpis", []),
+                "countermeasures": frontend_comment.get("countermeasures", {}),
+                "counter_speech": frontend_comment.get("counter_speech", {"should_generate": False, "generated_text": None}),
+            })
+            
+        result.append({
+            "id": thread_id,
+            "title": thread.get("title") or f"Thread {thread_id}",
+            "text": thread.get("text", ""),
+            "comments": formatted_comments
+        })
+
+    print("Cold-start payload for frontend from Redis:")
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    set_cached_threads(result)
+
 
 def save_to_mongodb_background(payload: dict):
     """Speichert den aktuellen Zwischenstand (Kommentar + bisherige Scores) in der DB"""
@@ -53,6 +151,7 @@ def save_to_mongodb_background(payload: dict):
         except Exception as e:
             print(f"Fehler bei MongoDB Speicherung: {e}")
 
+
 def forward_to_analyse_r(payload: dict):
     """Gibt die Daten sofort an R weiter"""
     try:
@@ -60,6 +159,7 @@ def forward_to_analyse_r(payload: dict):
         print("➡️ An Analyse-R weitergeleitet")
     except Exception as e:
         print(f"Analyse-R noch nicht erreichbar (ignoriert): {e}")
+
 
 def forward_to_moderation(payload: dict):
     """Gibt die Daten an die Moderation weiter"""
@@ -98,19 +198,15 @@ def reset_missing_neo4j_sync_status():
 def get_analysis_comments():
     return get_all_comments_for_analysis()
 
-@router.get("/demo/stream")
+@router.get("/events/stream")
 def stream_demo_updates():
     return StreamingResponse(iter_thread_updates(), media_type="text/event-stream")
 
 
 @router.post("/events/llm-labeled")
 def event_llm_labeled(payload: dict, background_tasks: BackgroundTasks):
-    """
-    SCHRITT 1: Wird vom LLM (analyse-py) aufgerufen, sobald Labels fertig sind.
-    """
-    update_cached_demo_data(payload)
+    """SCHRITT 1: Wird vom LLM aufgerufen, sobald Labels fertig sind."""
     publish_thread_update(payload)
-
     background_tasks.add_task(save_to_mongodb_background, payload)
     background_tasks.add_task(forward_to_analyse_r, payload)
 
@@ -119,280 +215,42 @@ def event_llm_labeled(payload: dict, background_tasks: BackgroundTasks):
 
 @router.post("/events/analysis-completed")
 def event_analysis_completed(payload: dict, background_tasks: BackgroundTasks):
-    """
-    SCHRITT 2: Wird von R (analyse-r) aufgerufen, sobald Scores berechnet sind.
-    """
-    update_cached_demo_data(payload)
+    """SCHRITT 2: Wird von R (analyse-r) aufgerufen, sobald Scores berechnet sind."""
     publish_thread_update(payload)
-
     background_tasks.add_task(save_to_mongodb_background, payload)
     background_tasks.add_task(forward_to_moderation, payload)
 
     return {"status": "ok", "message": "Broadcasted to UI, DB, and Moderation"}
 
 
-@router.post("/demo/publish")
-def publish_demo_update(
-    background_tasks: BackgroundTasks,
-    payload: Optional[dict] = Body(None),
-):
-    """
-    Nimmt einen JSON-Payload entgegen.
-    Wenn keiner gesendet wird, werden Dummy-Daten zum Testen generiert.
-    """
-    if not payload:
-        payload = {
-            "type": "comment_added",
-            "threadId": 1,
-            "comment": {
-                "id": 999,
-                "author": "Redis Demo",
-                "time": "2026-06-10T12:00:00Z",
-                "text": "Dieser Kommentar wurde über Redis an die offene Dashboard-Sitzung gesendet.",
-                "moderation": "Demo-Event aus dem Redis-SSE-Pfad.",
-                "kpis": [
-                    {"name": "Toxizität", "value": 0.18},
-                    {"name": "Respekt", "value": 0.22},
-                    {"name": "Relevanz", "value": 0.30},
-                    {"name": "Klarheit", "value": 0.25},
-                    {"name": "Emotionalität", "value": 0.20},
-                    {"name": "Sachlichkeit", "value": 0.28},
-                ],
-                "score": 0.24,
-            },
-        }
+@router.post("/events/save-moderation")
+def save_moderation_result(payload: dict):
+    print("Neue Moderationsergebnisse erhalten:")
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
 
-    update_cached_demo_data(payload)
-    subscribers = publish_thread_update(payload)
-
-    background_tasks.add_task(save_to_mongodb_background, payload)
-
-    return {
-        "status": "ok",
-        "subscribers": subscribers,
-        "event": payload,
-        "message": "Update gecacht und gestreamt. MongoDB-Speicherung ausstehend.",
-    }
+    if comments_collection is not None:
+        comments_collection.update_one(
+            {"comment_id": payload.get("comment_id")}, 
+            {"$set": {
+                "moderation_result": payload.get("moderation_result"),
+                "score": payload.get("score"),
+                "kpis": payload.get("kpis")
+            }}, 
+            upsert=True
+        )
+    return {"status": "saved"}
 
 
-@router.get("/demo-data")
-def read_demo_data():
-    return [{
-        "thread": {
-            "id": 1,
-            "title": "Diskussion zum neuen Mobilitätsbericht: Autofreie Innenstädte?",
-            "text": (
-                "Die Stadtverwaltung hat gestern den neuen Bericht zur Verkehrsentwicklung veröffentlicht. Laut den neuesten Statistiken hat sich die Luftqualität in den Testzonen deutlich verbessert, während Teile des Einzelhandels über Umsatzrückgänge klagen. Was ist eure Meinung zu diesen Zahlen? Sollen wir den Weg der autofreien Innenstädte weitergehen oder schadet das der Wirtschaft zu sehr?"
-            ),
-            "comments": [
-                {
-                    "id": 1,
-                    "author": "Anna",
-                    "time": "2024-06-01T12:00:00Z",
-                    "text": "Ich verstehe den Punkt, aber meiner Meinung nach sollten wir die aktuellen Statistiken aus dem Bericht von letzter Woche berücksichtigen, bevor wir voreilige Schlüsse ziehen.",
-                    "moderation": "Unauffällig. Sachlicher Beitrag, keine Aktion erforderlich.",
-                    "kpis": [
-                    {"name": "Toxizität", "value": 0.08},
-                    {"name": "Respekt", "value": 0.18},
-                    {"name": "Relevanz", "value": 0.12},
-                    {"name": "Klarheit", "value": 0.15},
-                    {"name": "Emotionalität", "value": 0.10},
-                    {"name": "Sachlichkeit", "value": 0.20}
-                    ],
-                    "score": 0.14
-                },
-                {
-                    "id": 2,
-                    "author": "Ben",
-                    "time": "2024-06-01T12:10:00Z",
-                    "text": "Das ist doch völliger Unsinn. Wer das wirklich glaubt, hat die letzten Jahre komplett geschlafen. Typisch, dass hier wieder nur einseitig argumentiert wird.",
-                    "moderation": "Frühwarnung: Der Ton wird schärfer und unsachlich. Im Auge behalten, Eskalationsgefahr.",
-                    "kpis": [
-                    {"name": "Toxizität", "value": 0.32},
-                    {"name": "Respekt", "value": 0.38},
-                    {"name": "Relevanz", "value": 0.35},
-                    {"name": "Klarheit", "value": 0.40},
-                    {"name": "Emotionalität", "value": 0.30},
-                    {"name": "Sachlichkeit", "value": 0.42}
-                    ],
-                    "score": 0.36
-                },
-                {
-                    "id": 3,
-                    "author": "Clara",
-                    "time": "2024-06-01T12:20:00Z",
-                    "text": "Ihr seid doch alle komplett gehirngewaschen und dumm! Es kotzt mich an, wie hier andauernd Lügen verbreitet werden. Haltet einfach die Klappe, wenn ihr keine Ahnung habt!",
-                    "moderation": "Eskalation: Hohe Toxizität und klare Richtlinienverletzung (Beleidigung). Beitrag verbergen und User verwarnen.",
-                    "kpis": [
-                    {"name": "Toxizität", "value": 0.72},
-                    {"name": "Respekt", "value": 0.68},
-                    {"name": "Relevanz", "value": 0.75},
-                    {"name": "Klarheit", "value": 0.60},
-                    {"name": "Emotionalität", "value": 0.80},
-                    {"name": "Sachlichkeit", "value": 0.65}
-                    ],
-                    "score": 0.70
-                },
-            ],
-        },
-    },
-    {
-    "thread": {
-        "id": 2,
-        "title": "Bürgerentscheid: Neues Wohngebiet am Stadtwald?",
-        "text": "Der Stadtrat hat gestern die Pläne für das neue Wohngebiet am Rande des Stadtwalds vorgestellt. Einerseits fehlt uns in der Kommune dringend bezahlbarer Wohnraum, besonders für junge Familien. Andererseits müssten dafür knapp 5 Hektar intakte Waldfläche gerodet werden. Wie seht ihr das? Soll der Wald als Naherholungsgebiet bleiben, oder hat die Schaffung von neuem Wohnraum absolute Vorrang?",
-        "comments": [
-            {
-                "id": 1,
-                "author": "David",
-                "time": "2024-06-01T14:30:00Z",
-                "text": "Wir sollten vielleicht prüfen, ob es nicht noch ungenutzte Brachflächen im Industriegebiet gibt, bevor wir intakte Natur zerstören. Eine Nachverdichtung im Zentrum wäre ökologisch sinnvoller und würde den Verkehr reduzieren.",
-                "moderation": "Unauffällig. Konstruktiver Beitrag mit konkretem Lösungsvorschlag, keine Aktion erforderlich.",
-                "kpis": [
-                    {"name": "Toxizität", "value": 0.05},
-                    {"name": "Respekt", "value": 0.10},
-                    {"name": "Relevanz", "value": 0.15},
-                    {"name": "Klarheit", "value": 0.12},
-                    {"name": "Emotionalität", "value": 0.08},
-                    {"name": "Sachlichkeit", "value": 0.18}
-                ],
-                "score": 0.11
-            },
-            {
-                "id": 2,
-                "author": "Elena",
-                "time": "2024-06-01T15:15:00Z",
-                "text": "Schön, dass die ganzen Öko-Träumer wieder in ihren teuren Altbauwohnungen sitzen und anderen vorschreiben wollen, wo sie zu leben haben. Irgendwo müssen die normalen Familien ja wohnen, aber das interessiert euch Realitätsverweigerer ja herzlich wenig.",
-                "moderation": "Frühwarnung: Leicht provokanter Ton und Pauschalisierungen. Noch im Rahmen der Meinungsfreiheit, aber im Auge behalten bezüglich aufkommender Konflikte.",
-                "kpis": [
-                    {"name": "Toxizität", "value": 0.35},
-                    {"name": "Respekt", "value": 0.42},
-                    {"name": "Relevanz", "value": 0.30},
-                    {"name": "Klarheit", "value": 0.35},
-                    {"name": "Emotionalität", "value": 0.48},
-                    {"name": "Sachlichkeit", "value": 0.38}
-                ],
-                "score": 0.38
-            },
-            {
-                "id": 3,
-                "author": "Frank",
-                "time": "2024-06-01T15:45:00Z",
-                "text": "Ihr verblendeten Betonfetischisten habt sie doch nicht mehr alle! Wenn ihr den Wald anfasst, kommen wir rüber und brennen eure scheiß Bagger ab. Verpisst euch mit euren dreckigen Bauprojekten, sonst knallt es!",
-                "moderation": "Eskalation: Eindeutige Gewaltandrohung und schwere Beleidigung. Beitrag sofort löschen, User sperren und Vorfall zur rechtlichen Prüfung an die Behörden melden.",
-                "kpis": [
-                    {"name": "Toxizität", "value": 0.94},
-                    {"name": "Respekt", "value": 0.88},
-                    {"name": "Relevanz", "value": 0.65},
-                    {"name": "Klarheit", "value": 0.85},
-                    {"name": "Emotionalität", "value": 0.96},
-                    {"name": "Sachlichkeit", "value": 0.72}
-                ],
-                "score": 0.89
-            },
-            {
-                "id": 4,
-                "author": "Greta",
-                "time": "2024-06-01T16:20:00Z",
-                "text": "Ich finde die Entscheidung extrem schwierig. Als Mutter von zwei Kindern suche ich seit Jahren eine größere, bezahlbare Wohnung und verzweifle langsam an den Preisen. Den Wald zu opfern tut mir zwar im Herzen weh, aber wir brauchen dringend Lösungen für junge Familien in dieser Stadt.",
-                "moderation": "Unauffällig. Emotionaler, aber sehr respektvoller Erfahrungsbericht, der beide Seiten der Debatte beleuchtet.",
-                "kpis": [
-                    {"name": "Toxizität", "value": 0.02},
-                    {"name": "Respekt", "value": 0.05},
-                    {"name": "Relevanz", "value": 0.08},
-                    {"name": "Klarheit", "value": 0.10},
-                    {"name": "Emotionalität", "value": 0.25},
-                    {"name": "Sachlichkeit", "value": 0.15}
-                ],
-                "score": 0.09
-            },
-            {
-                "id": 5,
-                "author": "Hans",
-                "time": "2024-06-01T17:05:00Z",
-                "text": "Ist doch eh alles schon beschlossene Sache. Die Baulobby hat dem Stadtrat doch längst die Taschen voll gemacht. Bezahlbarer Wohnraum? Wer's glaubt... Am Ende werden es eh wieder Luxuswohnungen für die Reichen. Einfach nur traurig, wie unsere Natur verkauft wird.",
-                "moderation": "Beobachten: Enthält unbelegte Unterstellungen (Korruption) gegenüber dem Stadtrat und starken Zynismus. Bleibt vorerst stehen, da keine direkte Beleidigung vorliegt, aber auf potenziell entgleisende Antworten achten.",
-                "kpis": [
-                    {"name": "Toxizität", "value": 0.28},
-                    {"name": "Respekt", "value": 0.35},
-                    {"name": "Relevanz", "value": 0.25},
-                    {"name": "Klarheit", "value": 0.20},
-                    {"name": "Emotionalität", "value": 0.40},
-                    {"name": "Sachlichkeit", "value": 0.45}
-                ],
-                "score": 0.32
-            }]
-        }
-    },
-    {
-        "thread": {
-        "id": 3,
-        "title": "Ideen für das diesjährige Straßenfest im Viertel",
-        "text": "Hallo Nachbarn! Nächsten Monat steht wieder unser jährliches Straßenfest an. Das Orga-Team hat schon ein paar Basis-Dinge geplant (Grillstation, Getränkestand, Kinderschminken). Habt ihr noch weitere Ideen oder Wünsche, was wir dieses Jahr anbieten könnten? Jeder Vorschlag ist willkommen, auch Helfer für den Aufbau werden noch gesucht!",
-        "comments": [
-            {
-                "id": 1,
-                "author": "Julia",
-                "time": "2024-06-02T09:00:00Z",
-                "text": "Wie wäre es mit einem kleinen Kuchenbackwettbewerb? Jeder könnte seinen Lieblingskuchen mitbringen und wir küren am Ende einen Gewinner. Die Einnahmen vom Kuchenverkauf könnten wir für den neuen Sandkasten am Spielplatz spenden.",
-                "moderation": "Unauffällig. Sehr konstruktiver und positiver Beitrag, keine Aktion erforderlich.",
-                "kpis": [
-                    { "name": "Toxizität", "value": 0.01 },
-                    { "name": "Respekt", "value": 0.02 },
-                    { "name": "Relevanz", "value": 0.05 },
-                    { "name": "Klarheit", "value": 0.04 },
-                    { "name": "Emotionalität", "value": 0.15 },
-                    { "name": "Sachlichkeit", "value": 0.10 }
-                ],
-                "score": 0.05
-            },
-            {
-                "id": 2,
-                "author": "Markus",
-                "time": "2024-06-02T10:15:00Z",
-                "text": "Die Idee mit dem Kuchen finde ich super! Eine kleine Bitte für dieses Jahr: Könnten wir die Musikboxen vielleicht etwas weiter weg von den Wohnhäusern aufstellen? Letztes Jahr war es abends doch etwas sehr laut für die kleinen Kinder, die schon schlafen wollten.",
-                "moderation": "Unauffällig. Sachliche und höfliche Bitte aus der Nachbarschaft. Keine Aktion erforderlich.",
-                "kpis": [
-                    { "name": "Toxizität", "value": 0.03 },
-                    { "name": "Respekt", "value": 0.05 },
-                    { "name": "Relevanz", "value": 0.10 },
-                    { "name": "Klarheit", "value": 0.08 },
-                    { "name": "Emotionalität", "value": 0.08 },
-                    { "name": "Sachlichkeit", "value": 0.20 }
-                ],
-                "score": 0.08
-            },
-            {
-                "id": 3,
-                "author": "Sabine",
-                "time": "2024-06-02T11:30:00Z",
-                "text": "Oh ja, das Fest wird bestimmt wieder toll! Mein Schwager hat eine Hüpfburg, die er uns vielleicht für den Nachmittag günstig ausleihen könnte. Soll ich ihn einfach mal unverbindlich fragen?",
-                "moderation": "Unauffällig. Freundliches Hilfsangebot, sehr positiv.",
-                "kpis": [
-                    { "name": "Toxizität", "value": 0.00 },
-                    { "name": "Respekt", "value": 0.01 },
-                    { "name": "Relevanz", "value": 0.02 },
-                    { "name": "Klarheit", "value": 0.05 },
-                    { "name": "Emotionalität", "value": 0.25 },
-                    { "name": "Sachlichkeit", "value": 0.05 }
-                ],
-                "score": 0.04
-            },
-            {
-                "id": 4,
-                "author": "Leon",
-                "time": "2024-06-02T13:45:00Z",
-                "text": "Gibt es beim Grillstand eigentlich auch vegetarische oder vegane Optionen? Falls noch nichts geplant ist, würde ich mich anbieten, ein paar Gemüsespieße vorzubereiten und Grillkäse zu besorgen.",
-                "moderation": "Unauffällig. Sachliche Rückfrage kombiniert mit einem Hilfsangebot.",
-                "kpis": [
-                    { "name": "Toxizität", "value": 0.02 },
-                    { "name": "Respekt", "value": 0.03 },
-                    { "name": "Relevanz", "value": 0.06 },
-                    { "name": "Klarheit", "value": 0.05 },
-                    { "name": "Emotionalität", "value": 0.04 },
-                    { "name": "Sachlichkeit", "value": 0.15 }
-                ],
-                "score": 0.06
-            }]
-        }
-    }]
+@router.get("/threads/latest")
+def get_latest_threads():
+    cached_data = get_cached_threads()
+    
+    if cached_data is None:
+        print("Redis Cache existiert noch nicht! Führe manuelles Cache-Warmup mit DB-Daten durch...")
+        warmup_redis_cache()
+        cached_data = get_cached_threads()
+
+    print("Payload returned to frontend from Redis:")
+    print(json.dumps(cached_data if cached_data is not None else [], ensure_ascii=False, indent=2))
+    
+    return cached_data if cached_data is not None else []

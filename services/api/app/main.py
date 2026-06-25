@@ -2,13 +2,14 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .router import router
+from .router import router, warmup_redis_cache
 from app.services.demo_cache import ensure_cached_demo_data
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
         ensure_cached_demo_data(force_refresh=True)
+        warmup_redis_cache()
     except Exception as exc:
         print(f"Warning: Could not initialize demo cache at startup: {exc}")
     yield
