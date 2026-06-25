@@ -470,13 +470,28 @@ assert_bluesky_save_success <- function(save_status) {
 
 # Diese Funktion holt die gespeicherten Bluesky-Prediction-Daten wieder aus der API. 
 
-fetch_bluesky_prediction_json_from_api <- function() {
-  log_info("Lade gespeicherte Bluesky-Prediction-Daten aus der API.")
+fetch_latest_comment_context_json_from_api <- function(thread_id, platform = "bluesky", source_file = NULL) {
+  log_info(paste0(
+    "Lade neuesten Kommentar-Kontext aus API für thread_id=",
+    thread_id
+  ))
 
-  log_info(paste0("Sende GET an API: ", ANALYSIS_BLUESKY_ENDPOINT))
+  query_params <- list(
+    platform = platform
+  )
+
+  if (!is.null(source_file) && !is.na(source_file) && trimws(as.character(source_file)) != "") {
+    query_params$source_file <- as.character(source_file)
+  }
+
+  url <- API_LATEST_COMMENT_CONTEXT_ENDPOINT(thread_id)
+
+  log_info(paste0("Sende GET an API: ", url))
+  log_info(paste0("Query platform=", platform))
 
   response <- httr::GET(
-    url = ANALYSIS_BLUESKY_ENDPOINT,
+    url = url,
+    query = query_params,
     httr::accept_json()
   )
 
@@ -485,11 +500,11 @@ fetch_bluesky_prediction_json_from_api <- function() {
   log_info(paste0("Antwort vom API-GET erhalten. HTTP-Status: ", status_code))
 
   if (httr::http_error(response)) {
-    log_info("FEHLER: Bluesky-Prediction-JSON konnte nicht aus der API geladen werden.")
+    log_info("FEHLER: Kommentar-Kontext konnte nicht aus der API geladen werden.")
 
     stop(
       paste0(
-        "Konnte Bluesky-Prediction-JSON nicht aus API laden. HTTP-Status: ",
+        "Konnte Kommentar-Kontext nicht aus API laden. HTTP-Status: ",
         status_code
       )
     )
@@ -499,11 +514,11 @@ fetch_bluesky_prediction_json_from_api <- function() {
 
   if (is.null(json_text) || trimws(json_text) == "") {
     log_info("FEHLER: API hat leeren JSON-Body geliefert.")
-    stop("API hat leeren JSON-Body für Bluesky-Prediction-Daten geliefert.")
+    stop("API hat leeren JSON-Body für Kommentar-Kontext geliefert.")
   }
 
   log_info(paste0(
-    "Bluesky-Prediction-JSON aus API geladen. Länge: ",
+    "Kommentar-Kontext aus API geladen. Länge: ",
     nchar(json_text),
     " Zeichen."
   ))
@@ -517,6 +532,11 @@ fetch_bluesky_prediction_json_from_api <- function() {
 
   json_text
 }
+
+
+
+
+
 
 # Diese Funktion sendet das fertige Bluesky-JSON an den Moderation-Service.
 send_bluesky_json_to_moderation <- function(json_text) {
@@ -579,17 +599,51 @@ send_bluesky_json_to_moderation <- function(json_text) {
 # 1. Prüfen, ob die Predictions erfolgreich in der API gespeichert wurden. 
 # 2. Die gespeicherten Prediction-Daten wieder aus der API laden. 
 # 3. Die geladenen JSON-Daten an den Moderation-Service senden.
-forward_bluesky_prediction_data_to_moderation <- function(save_status) {
+forward_bluesky_prediction_data_to_moderation <- function(save_status, bluesky_data) {
   log_info("Starte kompletten Weiterleitungs-Ablauf für Bluesky-Predictions.")
 
   assert_bluesky_save_success(save_status)
 
-  json_text <- fetch_bluesky_prediction_json_from_api()
+  thread_context <- bluesky_data %>%
+    dplyr::select(dplyr::any_of(c("thread_id", "source_file"))) %>%
+    dplyr::distinct()
 
-  moderation_result <- send_bluesky_json_to_moderation(json_text)
+  if (!"source_file" %in% names(thread_context)) {
+    thread_context$source_file <- NA_character_
+  }
+
+  log_info(paste0(
+    "Anzahl Threads für Moderation: ",
+    nrow(thread_context)
+  ))
+
+  moderation_results <- lapply(seq_len(nrow(thread_context)), function(i) {
+    thread_id <- thread_context$thread_id[i]
+    source_file <- thread_context$source_file[i]
+
+    log_info(paste0(
+      "Starte Moderation-Weiterleitung für Thread ",
+      i,
+      "/",
+      nrow(thread_context),
+      ": ",
+      thread_id
+    ))
+
+    json_text <- fetch_latest_comment_context_json_from_api(
+      thread_id = thread_id,
+      platform = "bluesky",
+      source_file = source_file
+    )
+
+    send_bluesky_json_to_moderation(json_text)
+  })
 
   log_info("Weiterleitungs-Ablauf für Bluesky-Predictions erfolgreich abgeschlossen.")
 
-  moderation_result
+  list(
+    ok = all(vapply(moderation_results, function(x) isTRUE(x$ok), logical(1))),
+    sent_threads = length(moderation_results),
+    results = moderation_results
+  )
 }
-

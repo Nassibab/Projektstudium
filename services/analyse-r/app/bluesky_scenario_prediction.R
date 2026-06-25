@@ -119,6 +119,8 @@ predict_bluesky_synthetic_roles <- function(thread_id) {
     model_results = documents$model_results
   )
 
+  moderation_status <- forward_bluesky_prediction_data_to_moderation( save_status = save_status, bluesky_data = bluesky_data )
+
   list(
     status = "success",
     model_loaded_from = MODEL_PATH,
@@ -126,6 +128,7 @@ predict_bluesky_synthetic_roles <- function(thread_id) {
     thread_id = thread_id,
     predicted_rows = nrow(result),
     predictions = result,
-    save_status = save_status
+    save_status = save_status,
+    moderation_status = moderation_status
   )
 }
