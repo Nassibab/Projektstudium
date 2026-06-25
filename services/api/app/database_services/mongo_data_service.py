@@ -781,6 +781,7 @@ def get_latest_moderation_thread(
 #4. Lade aus demselben Thread alle Kommentare davor.
 #5. Gib bei den vorherigen Kommentaren nur den Text zurück.
 
+
 def get_latest_comment_context_for_thread(
     thread_id: str,
     platform: str,
@@ -790,12 +791,10 @@ def get_latest_comment_context_for_thread(
 
     if platform == "bluesky":
         source_platform = "bluesky"
-        default_source_file = "bluesky"
         ml_collection_name = "bluesky_prediction_comments_results"
 
     elif platform in ["professor", "professor_dataset"]:
         source_platform = "professor_dataset"
-        default_source_file = None
         ml_collection_name = "professor_test_comment_results"
 
     else:
@@ -809,126 +808,182 @@ def get_latest_comment_context_for_thread(
     if str(thread_id).isdigit():
         thread_id_values.append(int(thread_id))
 
-    resolved_source_file = source_file or default_source_file
+    thread_id_values = list(dict.fromkeys(thread_id_values))
 
-    thread_query = {
-        "source_platform": source_platform,
+    query = {
         "thread_id": {"$in": thread_id_values},
     }
 
-    comment_query = {
-        "source_platform": source_platform,
-        "thread_id": {"$in": thread_id_values},
-    }
+    if source_file:
+        query["source_file"] = source_file
 
-    if resolved_source_file:
-        thread_query["source_file"] = resolved_source_file
-        comment_query["source_file"] = resolved_source_file
+    collection = mongo.collection(ml_collection_name)
 
-    thread = threads_collection.find_one(
-        thread_query,
-        {"_id": 0},
-    )
-
-    comments = list(
-        comments_collection.find(
-            comment_query,
-            {"_id": 0},
-        ).sort([
-            ("created_at", 1),
-            ("comment_id", 1),
+    # Alle gespeicherten Analyse-Kommentare zu genau diesem Thread laden.
+    # Quelle ist je nach platform entweder:
+    # - bluesky_prediction_comments_results
+    # - professor_test_comment_results
+    results = list(
+        collection.find(query).sort([
+            ("analysis_saved_at", -1),
+            ("_id", -1),
         ])
     )
 
-    if not thread and not comments:
+    if not results:
         return {
             "error": "thread_not_found",
-            "message": f"No thread found for platform={platform}, thread_id={thread_id}",
+            "message": (
+                f"No moderation analysis data found for "
+                f"platform={platform}, thread_id={thread_id}"
+            ),
         }
 
     # Sicherheitsprüfung:
-    # Bei Professor können gleiche thread_ids in mehreren source_files vorkommen.
-    # Wenn kein source_file angegeben wurde und mehrere Dateien gefunden werden,
-    # soll nicht versehentlich der falsche Thread geliefert werden.
+    # Professor-Thread-IDs können in mehreren source_files vorkommen.
     if not source_file and platform in ["professor", "professor_dataset"]:
         source_files = {
-            c.get("source_file")
-            for c in comments
-            if c.get("source_file") is not None
+            r.get("source_file")
+            for r in results
+            if r.get("source_file") is not None
         }
 
         if len(source_files) > 1:
             return {
                 "error": "ambiguous_thread",
                 "message": (
-                    f"Thread_id={thread_id} exists in multiple source_files. "
+                    f"thread_id={thread_id} exists in multiple source_files. "
                     "Please provide source_file as query parameter."
                 ),
                 "source_files": sorted(source_files),
             }
 
-    if comments:
-        resolved_source_file = comments[0].get("source_file") or resolved_source_file
+    # Falls ein Kommentar mehrfach gespeichert wurde:
+    # pro comment_id nur den neuesten Datensatz behalten.
+    latest_by_comment_id = {}
 
-    ml_collection = mongo.collection(ml_collection_name)
+    for r in results:
+        comment_id = r.get("comment_id")
 
-    # Hier wird die neueste ML-Prediction nur innerhalb dieses Threads gesucht.
-    ml_query = {
-        "thread_id": {"$in": [str(v) for v in thread_id_values]},
-    }
+        if comment_id is None:
+            continue
 
-    latest_ml = ml_collection.find_one(
-        ml_query,
-        sort=[("_id", -1)],
-    )
+        comment_key = str(comment_id)
 
-    if not latest_ml:
-        return {
-            "error": "ml_prediction_not_found",
-            "message": f"No ML prediction found for platform={platform}, thread_id={thread_id}",
-        }
+        if comment_key in latest_by_comment_id:
+            continue
 
-    latest_ml_clean = dict(latest_ml)
-    latest_ml_clean.pop("_id", None)
+        clean = dict(r)
+        clean.pop("_id", None)
 
-    latest_comment_id = latest_ml.get("comment_id")
+        latest_by_comment_id[comment_key] = clean
 
-    if latest_comment_id is None:
-        return {
-            "error": "comment_not_found",
-            "message": "Latest ML prediction has no comment_id",
-            "latest_ml_prediction": latest_ml_clean,
-        }
+    comments = list(latest_by_comment_id.values())
 
-    target_comment = None
-
-    for c in comments:
-        if str(c.get("comment_id")) == str(latest_comment_id):
-            target_comment = c
-            break
-
-    if target_comment is None:
+    if not comments:
         return {
             "error": "comment_not_found",
             "message": (
-                f"ML prediction found for thread_id={thread_id}, "
-                f"but matching comment_id={latest_comment_id} was not found in this thread"
+                f"No valid comments found for platform={platform}, "
+                f"thread_id={thread_id}"
             ),
-            "latest_ml_prediction": latest_ml_clean,
         }
 
-    llm_query = {
-        "thread_id": {"$in": [str(v) for v in thread_id_values]},
-        "comment_id": {"$in": [latest_comment_id, str(latest_comment_id)]},
+    # Thread-Reihenfolge herstellen.
+    # Wenn R thread_position_abs liefert, ist das am saubersten.
+    # Sonst fallback auf created_at/comment_id.
+    def comment_sort_key(comment: dict):
+        position = comment.get("thread_position_abs")
+
+        if position is not None:
+            try:
+                return (
+                    0,
+                    float(position),
+                    str(comment.get("created_at") or ""),
+                    str(comment.get("comment_id") or ""),
+                )
+            except (TypeError, ValueError):
+                pass
+
+        return (
+            1,
+            str(comment.get("created_at") or ""),
+            str(comment.get("comment_id") or ""),
+        )
+
+    comments.sort(key=comment_sort_key)
+
+    # Der letzte Kommentar im Thread-Kontext ist der aktuelle Kommentar
+    # für die Moderation.
+    latest_comment_raw = comments[-1]
+    latest_comment_id = latest_comment_raw.get("comment_id")
+
+    # Nur die Felder aus deinem gewünschten JSON ausgeben.
+    moderation_comment_fields = [
+        "comment_id",
+        "thread_id",
+        "source_file",
+        "login",
+        "text",
+        "created_at",
+        "parent_id",
+
+        "irony",
+        "attack_score",
+        "toxicity_score",
+        "swearword_count",
+        "negative_word_count",
+        "insult_count",
+        "direct_address_count",
+        "imperative_count",
+        "accusation_marker_count",
+        "mockery_marker_count",
+        "is_attacking",
+
+        "reply_depth",
+        "parent_is_root",
+        "num_children",
+        "thread_position_abs",
+        "thread_position_rel",
+        "num_previous_comments",
+
+        "prev_attack_rate",
+        "prev_toxicity_score_mean",
+        "prev_attack_count",
+        "prev_toxicity_score_max",
+        "prev_attack_score_max",
+
+        "recent_attack_rate_3",
+        "recent_attack_rate_5",
+        "attack_streak_current",
+        "target_recently_attacked",
+        "reply_after_attack",
+        "target_response_context_score",
+
+        "predicted_synthetic_role",
+        "predicted_synthetic_role_label",
+        "source_platform",
+        "analysis_saved_at",
+
+        "prob_class_1",
+        "prob_class_2",
+        "prob_class_3",
+        "prob_class_4",
+        "prob_class_5",
+        "prob_class_6",
+        "prob_class_7",
+    ]
+
+    latest_comment = {
+        field: latest_comment_raw.get(field)
+        for field in moderation_comment_fields
     }
 
-    if resolved_source_file:
-        llm_query["source_file"] = resolved_source_file
-
-    llm = mongo.collection("llm_analysis_results").find_one(
-        llm_query,
-        {"_id": 0},
-    ) or {}
+    # Falls source_platform in alten Professor-Ergebnissen fehlt,
+    # trotzdem sauber setzen.
+    if latest_comment.get("source_platform") is None:
+        latest_comment["source_platform"] = source_platform
 
     previous_comments = []
 
@@ -938,66 +993,21 @@ def get_latest_comment_context_for_thread(
 
         previous_comments.append({
             "comment_id": c.get("comment_id"),
-            "login": c.get("user"),
+            "login": c.get("login"),
             "created_at": c.get("created_at"),
             "text": c.get("text"),
         })
 
     return {
         "platform": platform,
+        "source_collection": ml_collection_name,
+        "thread_id": thread_id,
+        "source_file": source_file or latest_comment.get("source_file"),
 
-        "thread": {
-            "thread_id": thread.get("thread_id") if thread else thread_id,
-            "source_file": thread.get("source_file") if thread else resolved_source_file,
-            "source_platform": source_platform,
-            "source_type": thread.get("source_type") if thread else target_comment.get("source_type"),
-            "title": thread.get("title") if thread else None,
-            "comments_count": thread.get("comments_count") if thread else len(comments),
-            "scenario_type": thread.get("scenario_type") if thread else None,
-            "label_shitstorm": thread.get("label_shitstorm") if thread else None,
-        },
+        # Genau der Kommentar im flachen Format aus deinem Beispiel
+        "latest_comment": latest_comment,
 
-        "latest_comment": {
-            "comment_id": target_comment.get("comment_id"),
-            "thread_id": target_comment.get("thread_id"),
-            "source_file": target_comment.get("source_file"),
-            "parent_id": target_comment.get("parent_id"),
-            "login": target_comment.get("user"),
-            "text": target_comment.get("text"),
-            "created_at": target_comment.get("created_at"),
-            "source_platform": target_comment.get("source_platform"),
-            "source_type": target_comment.get("source_type"),
-
-            "llm_metrics": {
-                "irony": llm.get("irony"),
-                "attack_score": llm.get("attack_score"),
-                "toxicity_score": llm.get("toxicity_score"),
-                "swearword_count": llm.get("swearword_count"),
-                "negative_word_count": llm.get("negative_word_count"),
-                "insult_count": llm.get("insult_count"),
-                "direct_address_count": llm.get("direct_address_count"),
-                "imperative_count": llm.get("imperative_count"),
-                "accusation_marker_count": llm.get("accusation_marker_count"),
-                "mockery_marker_count": llm.get("mockery_marker_count"),
-                "is_attacking": llm.get("is_attacking"),
-            },
-
-            "ml_prediction": {
-                "predicted_synthetic_role": latest_ml.get("predicted_synthetic_role"),
-                "predicted_synthetic_role_label": latest_ml.get("predicted_synthetic_role_label"),
-                "prob_root": latest_ml.get("prob_root"),
-                "prob_meta": latest_ml.get("prob_meta"),
-                "prob_discussion": latest_ml.get("prob_discussion"),
-                "prob_counter_speech": latest_ml.get("prob_counter_speech"),
-                "prob_attack": latest_ml.get("prob_attack"),
-                "prob_target_response": latest_ml.get("prob_target_response"),
-                "prob_deescalation": latest_ml.get("prob_deescalation"),
-            },
-
-            "has_llm_metrics": bool(llm),
-            "has_ml_prediction": True,
-        },
-
+        # Danach die vorherigen Kommentare aus demselben Thread
         "previous_comments_count": len(previous_comments),
         "previous_comments": previous_comments,
     }

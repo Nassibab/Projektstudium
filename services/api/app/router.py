@@ -287,6 +287,12 @@ def latest_comment_context_for_thread(
             detail=result["message"],
         )
 
+    if isinstance(result, dict) and result.get("error") == "ambiguous_thread":
+        raise HTTPException(
+            status_code=400,
+            detail=result,
+        )
+
     if isinstance(result, dict) and result.get("error") in [
         "thread_not_found",
         "ml_prediction_not_found",
@@ -298,8 +304,6 @@ def latest_comment_context_for_thread(
         )
 
     return result
-
-
 
 
 
