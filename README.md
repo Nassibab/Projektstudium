@@ -158,6 +158,7 @@ Die Verarbeitung umfasst:
 
 | Service | URL |
 |----------|-----|
+| Frontend | http://localhost:3000/ |
 | API-Service | http://localhost:8000/docs |
 | Ingestion-Service | http://localhost:8001/docs |
 | LLM-Service | http://localhost:8011/docs |
@@ -243,6 +244,18 @@ Password: password
 (:Comment)-[:REPLY_TO]->(:Comment)
 (:User)-[:REPLIED_TO_USER]->(:User)
 ```
+
+---
+
+## Frontend Nutzung
+
+Das Frontend erlaubt es einen Thread auszuaehlen aus dem Professordatensatz oder Bluesky. Entsprechend braucht es etwa beim Professordatensatz die Angabe eines Source Files.
+
+Als Beispiel kann als Thread_ID ```SYN0001``` angegeben werden.
+Dann ```Professor``` in der Auswahl.
+Und zuletzt bspw. dieser Datensatz 
+```synthetic_shitstorm_dataset_3.json```
+
 
 ---
 

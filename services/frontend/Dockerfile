@@ -10,6 +10,6 @@ RUN npm run build
 FROM nginx:alpine
 COPY --from=builder /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
-COPY response_1782412337112.json /usr/share/nginx/html/data.json
+# COPY response_1782412337112.json /usr/share/nginx/html/data.json
 EXPOSE 3000
 CMD ["nginx", "-g", "daemon off;"]

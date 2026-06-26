@@ -148,7 +148,6 @@ export default {
     }
   },
   computed: {
-    // 1. Sortierte Daten (Neueste zuerst)
     sortedCommentsReverse() {
       if (!this.threadData?.rows) return [];
       return [...this.threadData.rows].sort((a, b) => 
@@ -167,7 +166,6 @@ export default {
       );
     },
 
-    // 2. Bestehende Chart-Logik
     scoreHistory() {
       if (!this.threadData?.rows) return [];
       return [...this.threadData.rows]
@@ -236,17 +234,25 @@ export default {
   methods: {
     async fetchEvaluation() {
       this.loading = true;
+      
       try {
         const res = await api.getEvaluation(this.searchThreadId, this.searchPlatform, this.searchSourceFile);
-        this.threadData = res.data;
-        this.selectedWindowStart = this.sortedWindowsReverse[0]?.window_start || null;
+        
+        if (res.data && Object.keys(res.data).length > 0) {
+          this.threadData = res.data;
+          this.selectedWindowStart = this.sortedWindowsReverse[0]?.window_start || null;
+        } else {
+          // Falls vom Endpunkt wirklich leere Daten kommen, leeren wir das Dashboard
+          this.threadData = null;
+        }
       } catch (e) {
         console.error('Fehler beim Laden:', e);
+        this.threadData = null;
       } finally {
         this.loading = false;
       }
     },
-    // Hilfsfunktionen für SVG & Formatierung
+
     timeToX(date) {
       const { min, max } = this.scoreTimeBounds;
       if (!min || !max || !date) return 20;
