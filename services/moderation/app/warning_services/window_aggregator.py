@@ -6,10 +6,8 @@ from typing import Any
 
 class WindowAggregator:
     """
-    Aggregiert Kommentare im neuen Standardformat direkt zu Fenster-Metriken.
+    Aggregiert Kommentare direkt zu Fenster-Metriken.
 
-    - Fenster-/Thread-Metriken wie comment_count, unique_users,
-      dominant_user_ratio usw. werden hier berechnet.
     """
 
     REQUIRED_STANDARD_FIELDS = [

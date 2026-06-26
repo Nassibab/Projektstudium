@@ -1,13 +1,14 @@
-# app/evaluate_thread_payload.py
-
 from __future__ import annotations
 
+import csv
 import json
+import math
+from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from app.evaluation_window_json_report import save_window_report_json
+from app.evaluation_window_report import collect_aggregated_windows
 from app.moderation_warning_service import ModerationWarningService
 
 
@@ -17,128 +18,6 @@ LEVEL_ORDER = {
     "warning": 2,
     "critical": 3,
 }
-
-ROLE_LABELS = {
-    "1": "root",
-    "2": "meta",
-    "3": "discussion",
-    "4": "counter_speech",
-    "5": "attack",
-    "6": "target_response",
-    "7": "deescalation",
-}
-
-STANDARD_REQUIRED_FIELDS = [
-    "comment_id",
-    "thread_id",
-    "login",
-    "text",
-    "created_at",
-    "parent_id",
-    "irony",
-    "attack_score",
-    "toxicity_score",
-    "swearword_count",
-    "negative_word_count",
-    "insult_count",
-    "direct_address_count",
-    "imperative_count",
-    "accusation_marker_count",
-    "mockery_marker_count",
-    "is_attacking",
-    "reply_depth",
-    "parent_is_root",
-    "num_children",
-    "thread_position_abs",
-    "thread_position_rel",
-    "num_previous_comments",
-    "prev_attack_rate",
-    "prev_toxicity_score_mean",
-    "prev_attack_count",
-    "prev_toxicity_score_max",
-    "prev_attack_score_max",
-    "recent_attack_rate_3",
-    "recent_attack_rate_5",
-    "attack_streak_current",
-    "target_recently_attacked",
-    "reply_after_attack",
-    "target_response_context_score",
-    "predicted_synthetic_role",
-    "predicted_synthetic_role_label",
-    "prob_class_1",
-    "prob_class_2",
-    "prob_class_3",
-    "prob_class_4",
-    "prob_class_5",
-    "prob_class_6",
-    "prob_class_7",
-]
-
-
-NUMERIC_FIELDS = {
-    "irony",
-    "attack_score",
-    "toxicity_score",
-    "swearword_count",
-    "negative_word_count",
-    "insult_count",
-    "direct_address_count",
-    "imperative_count",
-    "accusation_marker_count",
-    "mockery_marker_count",
-    "thread_position_rel",
-    "prev_attack_rate",
-    "prev_toxicity_score_mean",
-    "prev_toxicity_score_max",
-    "prev_attack_score_max",
-    "recent_attack_rate_3",
-    "recent_attack_rate_5",
-    "target_response_context_score",
-    "prob_class_1",
-    "prob_class_2",
-    "prob_class_3",
-    "prob_class_4",
-    "prob_class_5",
-    "prob_class_6",
-    "prob_class_7",
-}
-
-INTEGER_FIELDS = {
-    "is_attacking",
-    "reply_depth",
-    "parent_is_root",
-    "num_children",
-    "thread_position_abs",
-    "num_previous_comments",
-    "prev_attack_count",
-    "attack_streak_current",
-    "target_recently_attacked",
-    "reply_after_attack",
-}
-
-
-METRIC_KEYS = [
-    "irony",
-    "attack_score",
-    "toxicity_score",
-    "swearword_count",
-    "negative_word_count",
-    "insult_count",
-    "direct_address_count",
-    "imperative_count",
-    "accusation_marker_count",
-    "mockery_marker_count",
-]
-
-PROBABILITY_KEYS = [
-    "prob_class_1",
-    "prob_class_2",
-    "prob_class_3",
-    "prob_class_4",
-    "prob_class_5",
-    "prob_class_6",
-    "prob_class_7",
-]
 
 
 def safe_name(value: str) -> str:
@@ -174,34 +53,139 @@ def get_str_id(value: Any, default: str = "") -> str:
 
 def parse_time(value: Any) -> datetime:
     value = str(value).strip()
-
     if value.endswith("Z"):
         value = value.replace("Z", "+00:00")
-
     return datetime.fromisoformat(value)
 
 
 def get_thread_meta(thread_data: dict[str, Any]) -> dict[str, Any]:
     thread_meta = thread_data.get("thread")
-
-    if isinstance(thread_meta, dict):
-        return thread_meta
-
-    return {}
+    return thread_meta if isinstance(thread_meta, dict) else {}
 
 
-def get_thread_id(
-    thread_data: dict[str, Any],
-    comments: list[dict[str, Any]],
-) -> str:
+def get_raw_comments(thread_data: dict[str, Any]) -> list[dict[str, Any]]:
+    if isinstance(thread_data.get("comments"), list):
+        return thread_data["comments"]
+
+    thread = thread_data.get("thread")
+    if isinstance(thread, dict) and isinstance(thread.get("comments"), list):
+        return thread["comments"]
+
+    data = thread_data.get("data")
+    if isinstance(data, dict) and isinstance(data.get("comments"), list):
+        return data["comments"]
+
+    raise ValueError("API-Response muss eine comments-Liste enthalten.")
+
+
+def get_thread_id(thread_data: dict[str, Any], comments: list[dict[str, Any]]) -> str:
     thread_meta = get_thread_meta(thread_data)
-
     return str(
         thread_meta.get("thread_id")
         or thread_data.get("thread_id")
         or comments[0].get("thread_id")
         or "unknown_thread"
     )
+
+
+def get_thread_size(thread_data: dict[str, Any], comments: list[dict[str, Any]]) -> int:
+    thread_meta = get_thread_meta(thread_data)
+    return int(
+        thread_meta.get("comments_count")
+        or thread_data.get("comments_count")
+        or len(comments)
+    )
+
+
+def get_metric(raw: dict[str, Any], key: str, default: float = 0.0) -> float:
+    if key in raw:
+        return to_float(raw.get(key), default)
+
+    llm_metrics = raw.get("llm_metrics")
+    if isinstance(llm_metrics, dict):
+        return to_float(llm_metrics.get(key), default)
+
+    return default
+
+
+def get_probability(raw: dict[str, Any], key: str, default: float = 0.0) -> float:
+    if key in raw:
+        return to_float(raw.get(key), default)
+
+    ml_prediction = raw.get("ml_prediction")
+    if isinstance(ml_prediction, dict):
+        return to_float(ml_prediction.get(key), default)
+
+    return default
+
+
+def get_role(raw: dict[str, Any]) -> str:
+    if raw.get("predicted_synthetic_role") is not None:
+        return str(raw.get("predicted_synthetic_role"))
+
+    ml_prediction = raw.get("ml_prediction")
+    if isinstance(ml_prediction, dict):
+        if ml_prediction.get("predicted_synthetic_role") is not None:
+            return str(ml_prediction.get("predicted_synthetic_role"))
+
+    if raw.get("synthetic_role") is not None:
+        return str(raw.get("synthetic_role"))
+
+    if raw.get("predicted_synthetic_role_label") is not None:
+        return str(raw.get("predicted_synthetic_role_label"))
+
+    return ""
+
+
+def get_role_label(raw: dict[str, Any]) -> str:
+    if raw.get("predicted_synthetic_role_label") is not None:
+        return str(raw.get("predicted_synthetic_role_label"))
+
+    ml_prediction = raw.get("ml_prediction")
+    if isinstance(ml_prediction, dict):
+        if ml_prediction.get("predicted_synthetic_role_label") is not None:
+            return str(ml_prediction.get("predicted_synthetic_role_label"))
+
+    if raw.get("synthetic_role") is not None:
+        return str(raw.get("synthetic_role"))
+
+    return ""
+
+
+def build_llm_metrics(raw: dict[str, Any]) -> dict[str, Any]:
+    if isinstance(raw.get("llm_metrics"), dict):
+        return raw["llm_metrics"]
+
+    return {
+        "irony": get_metric(raw, "irony"),
+        "attack_score": get_metric(raw, "attack_score"),
+        "toxicity_score": get_metric(raw, "toxicity_score"),
+        "swearword_count": get_metric(raw, "swearword_count"),
+        "negative_word_count": get_metric(raw, "negative_word_count"),
+        "insult_count": get_metric(raw, "insult_count"),
+        "direct_address_count": get_metric(raw, "direct_address_count"),
+        "imperative_count": get_metric(raw, "imperative_count"),
+        "accusation_marker_count": get_metric(raw, "accusation_marker_count"),
+        "mockery_marker_count": get_metric(raw, "mockery_marker_count"),
+        "is_attacking": to_int(raw.get("is_attacking"), 0),
+    }
+
+
+def build_ml_prediction(raw: dict[str, Any]) -> dict[str, Any]:
+    if isinstance(raw.get("ml_prediction"), dict):
+        return raw["ml_prediction"]
+
+    return {
+        "predicted_synthetic_role": raw.get("predicted_synthetic_role"),
+        "predicted_synthetic_role_label": raw.get("predicted_synthetic_role_label"),
+        "prob_class_1": raw.get("prob_class_1"),
+        "prob_class_2": raw.get("prob_class_2"),
+        "prob_class_3": raw.get("prob_class_3"),
+        "prob_class_4": raw.get("prob_class_4"),
+        "prob_class_5": raw.get("prob_class_5"),
+        "prob_class_6": raw.get("prob_class_6"),
+        "prob_class_7": raw.get("prob_class_7"),
+    }
 
 
 def get_score(prediction: dict[str, Any]) -> tuple[float, float]:
@@ -217,7 +201,6 @@ def get_score(prediction: dict[str, Any]) -> tuple[float, float]:
 
     if "shitstorm_barometer" in prediction:
         score_0_100 = float(prediction["shitstorm_barometer"])
-
         if score_0_100 <= 1:
             score_0_100 *= 100
     else:
@@ -228,7 +211,6 @@ def get_score(prediction: dict[str, Any]) -> tuple[float, float]:
 
 def get_dimension_scores(prediction: dict[str, Any]) -> dict[str, float]:
     scores = prediction.get("dimension_scores", {}) or {}
-
     return {
         "frequency": float(scores.get("frequency", 0.0)),
         "aggression_toxicity": float(scores.get("aggression_toxicity", 0.0)),
@@ -237,348 +219,182 @@ def get_dimension_scores(prediction: dict[str, Any]) -> dict[str, float]:
     }
 
 
-def format_table(rows: list[dict[str, Any]]) -> str:
-    columns = [
-        ("nr", "#"),
-        ("comment_id", "comment_id"),
-        ("created_at", "created_at"),
-        ("comment_count", "comments"),
-        ("unique_users", "users"),
-        ("attack_count", "attacks"),
-        ("attack_ratio", "attack_ratio"),
-        ("toxic_ratio", "toxic_ratio"),
-        ("attack_probability_mean", "p_attack"),
-        ("freq", "freq"),
-        ("aggr", "aggr"),
-        ("dyn", "dyn"),
-        ("focus", "focus"),
-        ("score_0_100", "score_100"),
-        ("warning_level", "level"),
-    ]
-
-    headers = [label for _, label in columns]
-    table_rows = []
-
-    for row in rows:
-        values = []
-
-        for key, _ in columns:
-            value = row.get(key, "")
-
-            if isinstance(value, float):
-                value = f"{value:.3f}"
-
-            values.append(str(value))
-
-        table_rows.append(values)
-
-    widths = [len(header) for header in headers]
-
-    for row in table_rows:
-        for index, value in enumerate(row):
-            widths[index] = max(widths[index], len(value))
-
-    def make_line(values: list[str]) -> str:
-        return " | ".join(
-            value.ljust(widths[index])
-            for index, value in enumerate(values)
-        )
-
-    separator = "-+-".join("-" * width for width in widths)
-
-    lines = [make_line(headers), separator]
-    lines.extend(make_line(row) for row in table_rows)
-
-    return "\n".join(lines)
-
-
-def nested_get(raw: dict[str, Any], container_key: str, key: str) -> Any:
-    container = raw.get(container_key)
-
-    if isinstance(container, dict):
-        return container.get(key)
-
-    return None
-
-
-def metric_value(raw: dict[str, Any], key: str, default: float = 0.0) -> float:
-    if key in raw:
-        return to_float(raw.get(key), default)
-
-    nested_value = nested_get(raw, "llm_metrics", key)
-    if nested_value is not None:
-        return to_float(nested_value, default)
-
-    return default
-
-
-def prediction_value(raw: dict[str, Any], key: str, default: Any = None) -> Any:
-    if key in raw:
-        return raw.get(key)
-
-    nested_value = nested_get(raw, "ml_prediction", key)
-    if nested_value is not None:
-        return nested_value
-
-    return default
-
-
-def get_predicted_role(raw: dict[str, Any]) -> str:
-    role = prediction_value(raw, "predicted_synthetic_role")
-
-    if role is None:
-        role = raw.get("synthetic_role")
-
-    if role is None:
-        return ""
-
-    return str(role)
-
-
-def get_predicted_role_label(raw: dict[str, Any], role: str) -> str:
-    label = prediction_value(raw, "predicted_synthetic_role_label")
-
-    if label is not None:
-        return str(label)
-
-    return ROLE_LABELS.get(str(role), "")
-
-
-def is_attack_comment(raw: dict[str, Any], attack_score: float, role: str, role_label: str) -> int:
-    if raw.get("is_attacking") is not None:
-        return int(to_int(raw.get("is_attacking"), 0) == 1)
-
-    llm_is_attacking = nested_get(raw, "llm_metrics", "is_attacking")
-    if llm_is_attacking is not None:
-        return int(to_int(llm_is_attacking, 0) == 1)
-
-    return int(
-        attack_score >= 5
-        or str(role) == "5"
-        or str(role_label).lower() == "attack"
-    )
-
-
-def calculate_previous_attack_streak(previous_attack_flags: list[int]) -> int:
-    streak = 0
-
-    for flag in reversed(previous_attack_flags):
-        if flag != 1:
-            break
-        streak += 1
-
-    return streak
-
-
-def prepare_comments_for_warning_service(
-    thread_data: dict[str, Any],
-) -> list[dict[str, Any]]:
-    """Bereitet Kommentare für den Service im neuen Standardformat vor.
-
-    Die Evaluation soll denselben Inputpfad nutzen wie /moderation/warning.
-    Deshalb werden keine alten Analyse-R-Featurefelder mehr erzeugt.
-    Diese Funktion sortiert nur, füllt fehlende Standardfelder konservativ auf
-    und erhält alle neuen Standardvariablen direkt.
-    """
-
-    raw_comments = thread_data.get("comments")
-
-    if not isinstance(raw_comments, list):
-        raise ValueError("API-Response muss top-level 'comments' als Liste enthalten.")
-
+def prepare_comments_for_warning_service(thread_data: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_comments = get_raw_comments(thread_data)
     if not raw_comments:
         raise ValueError("comments-Liste ist leer.")
 
-    comments = sorted(
-        raw_comments,
-        key=lambda item: str(item.get("created_at", "")),
-    )
-
+    comments = sorted(raw_comments, key=lambda item: str(item.get("created_at", "")))
     thread_meta = get_thread_meta(thread_data)
     thread_id = get_thread_id(thread_data, comments)
-    thread_size = int(
-        thread_meta.get("comments_count")
-        or thread_data.get("comments_count")
-        or len(comments)
-    )
+    thread_size = get_thread_size(thread_data, comments)
 
-    root_comment_id = str(
-        thread_meta.get("root_comment_id")
-        or thread_meta.get("root_id")
-        or ""
-    )
+    login_total = Counter(str(comment.get("login", "")) for comment in comments)
+    thread_user_count = len(login_total)
+    thread_max_comments_by_one_user = max(login_total.values()) if login_total else 0
+    thread_single_comment_user_count = sum(1 for count in login_total.values() if count == 1)
+    thread_mean_comments_per_user = thread_size / thread_user_count if thread_user_count else 0.0
+    thread_max_user_share = thread_max_comments_by_one_user / thread_size if thread_size else 0.0
+    thread_single_comment_user_share = thread_single_comment_user_count / thread_user_count if thread_user_count else 0.0
 
-    if not root_comment_id:
-        for raw in comments:
-            candidate_comment_id = get_str_id(raw.get("comment_id", raw.get("id")))
-            candidate_parent_id = get_str_id(raw.get("parent_id", raw.get("parent")), "")
+    root_comment_id = thread_id
+    parent_by_comment_id: dict[str, str] = {}
+    children_by_parent: dict[str, int] = defaultdict(int)
 
-            if not candidate_parent_id:
-                root_comment_id = candidate_comment_id
-                break
-
-    if not root_comment_id:
-        root_comment_id = get_str_id(
-            comments[0].get("comment_id", comments[0].get("id")),
-            thread_id,
-        )
-
-    children_by_parent: dict[str, int] = {}
     for raw in comments:
+        comment_id = get_str_id(raw.get("comment_id", raw.get("id")))
         parent_id = get_str_id(raw.get("parent_id", raw.get("parent")), "")
+        parent_by_comment_id[comment_id] = parent_id
         if parent_id:
-            children_by_parent[parent_id] = children_by_parent.get(parent_id, 0) + 1
+            children_by_parent[parent_id] += 1
 
+    user_seen_count: dict[str, int] = defaultdict(int)
     previous_attack_flags: list[int] = []
     previous_toxicity_scores: list[float] = []
     previous_attack_scores: list[float] = []
 
+    first_created_at = parse_time(comments[0]["created_at"])
+    previous_created_at = first_created_at
+
     prepared: list[dict[str, Any]] = []
 
     for index, raw in enumerate(comments, start=1):
-        comment_id = get_str_id(raw.get("comment_id", raw.get("id")), f"comment_{index}")
+        comment_id = get_str_id(raw.get("comment_id", raw.get("id")))
         parent_id = get_str_id(raw.get("parent_id", raw.get("parent")), "")
+        login = str(raw.get("login", ""))
+        created_at = parse_time(raw["created_at"])
 
-        attack_score = metric_value(raw, "attack_score", 1.0)
-        toxicity_score = metric_value(raw, "toxicity_score", 1.0)
+        llm_metrics = build_llm_metrics(raw)
+        ml_prediction = build_ml_prediction(raw)
 
-        role = get_predicted_role(raw)
-        role_label = get_predicted_role_label(raw, role)
-        is_attacking = is_attack_comment(raw, attack_score, role, role_label)
+        attack_score = to_float(llm_metrics.get("attack_score"))
+        toxicity_score = to_float(llm_metrics.get("toxicity_score"))
+        role_label = str(get_role_label(raw)).lower()
 
-        previous_comment_count = to_int(raw.get("num_previous_comments"), index - 1)
+        is_attacking = int(
+            to_int(llm_metrics.get("is_attacking")) == 1
+            or attack_score >= 5
+            or role_label == "attack"
+            or str(get_role(raw)) == "5"
+        )
+
+        previous_comments_count = to_int(raw.get("num_previous_comments"), index - 1)
+        time_since_thread_start = (created_at - first_created_at).total_seconds()
+        time_since_previous_comment = 0.0 if index == 1 else (created_at - previous_created_at).total_seconds()
+        previous_created_at = created_at
+
+        login_count_total = login_total.get(login, 0)
+        user_count_before = user_seen_count[login]
+        user_previous_thread_share = user_count_before / (index - 1) if index > 1 else 0.0
+        user_seen_count[login] += 1
+
+        previous_comment_attack = previous_attack_flags[-1] if previous_attack_flags else 0
         prev_attack_count = to_int(raw.get("prev_attack_count"), sum(previous_attack_flags))
         prev_attack_rate = to_float(
             raw.get("prev_attack_rate"),
-            sum(previous_attack_flags) / len(previous_attack_flags)
-            if previous_attack_flags
-            else 0.0,
+            sum(previous_attack_flags) / len(previous_attack_flags) if previous_attack_flags else 0.0,
         )
         prev_toxicity_score_mean = to_float(
             raw.get("prev_toxicity_score_mean"),
-            sum(previous_toxicity_scores) / len(previous_toxicity_scores)
-            if previous_toxicity_scores
-            else 1.0,
+            sum(previous_toxicity_scores) / len(previous_toxicity_scores) if previous_toxicity_scores else 0.0,
         )
         prev_toxicity_score_max = to_float(
             raw.get("prev_toxicity_score_max"),
-            max(previous_toxicity_scores)
-            if previous_toxicity_scores
-            else 1.0,
+            max(previous_toxicity_scores) if previous_toxicity_scores else 0.0,
         )
         prev_attack_score_max = to_float(
             raw.get("prev_attack_score_max"),
-            max(previous_attack_scores)
-            if previous_attack_scores
-            else 1.0,
+            max(previous_attack_scores) if previous_attack_scores else 0.0,
         )
 
-        recent_3_flags = previous_attack_flags[-3:]
-        recent_5_flags = previous_attack_flags[-5:]
-        recent_attack_rate_3 = to_float(
-            raw.get("recent_attack_rate_3"),
-            sum(recent_3_flags) / len(recent_3_flags)
-            if recent_3_flags
-            else 0.0,
-        )
-        recent_attack_rate_5 = to_float(
-            raw.get("recent_attack_rate_5"),
-            sum(recent_5_flags) / len(recent_5_flags)
-            if recent_5_flags
-            else 0.0,
-        )
-
-        previous_streak = calculate_previous_attack_streak(previous_attack_flags)
-        attack_streak_current = to_int(
-            raw.get("attack_streak_current"),
-            previous_streak + 1 if is_attacking else 0,
-        )
-
-        standard_comment = {
+        prepared_comment = {
+            "is_long_thread": int(thread_size >= 100),
+            "created_at": raw["created_at"],
+            "id": comment_id,
             "comment_id": comment_id,
-            "thread_id": get_str_id(raw.get("thread_id"), thread_id),
-            "source_file": raw.get("source_file", thread_meta.get("source_file")),
-            "login": str(raw.get("login", "")),
-            "text": raw.get("text", ""),
-            "created_at": raw.get("created_at"),
-            "parent_id": parent_id,
-
-            "irony": metric_value(raw, "irony", 1.0),
-            "attack_score": attack_score,
-            "toxicity_score": toxicity_score,
-            "swearword_count": metric_value(raw, "swearword_count", 0.0),
-            "negative_word_count": metric_value(raw, "negative_word_count", 0.0),
-            "insult_count": metric_value(raw, "insult_count", 0.0),
-            "direct_address_count": metric_value(raw, "direct_address_count", 0.0),
-            "imperative_count": metric_value(raw, "imperative_count", 0.0),
-            "accusation_marker_count": metric_value(raw, "accusation_marker_count", 0.0),
-            "mockery_marker_count": metric_value(raw, "mockery_marker_count", 0.0),
+            "thread_id": thread_id,
+            "synthetic_role": get_role(raw),
+            "irony": to_float(llm_metrics.get("irony")),
+            "negative_word_count": to_float(llm_metrics.get("negative_word_count")),
+            "insult_count": to_float(llm_metrics.get("insult_count")),
             "is_attacking": is_attacking,
-
-            "reply_depth": to_int(raw.get("reply_depth"), 1 if parent_id else 0),
-            "parent_is_root": to_int(raw.get("parent_is_root"), int(parent_id == root_comment_id)),
-            "num_children": to_int(raw.get("num_children"), children_by_parent.get(comment_id, 0)),
+            "attack_score": attack_score,
+            "swearword_count": to_float(llm_metrics.get("swearword_count")),
+            "toxicity_score": toxicity_score,
+            "direct_address_count": to_float(llm_metrics.get("direct_address_count")),
+            "imperative_count": to_float(llm_metrics.get("imperative_count")),
+            "accusation_marker_count": to_float(llm_metrics.get("accusation_marker_count")),
+            "mockery_marker_count": to_float(llm_metrics.get("mockery_marker_count")),
+            "login": login,
+            "text": raw.get("text", ""),
+            "subject": raw.get("subject", ""),
+            "parent": parent_id,
+            "parent_id": parent_id,
+            "target_login": raw.get("target_login"),
+            "login_count": login_count_total,
+            "login_percentage": login_count_total / thread_size if thread_size else 0.0,
+            "frequency_group": raw.get("frequency_group", 1),
+            "date_timestamp": created_at.timestamp(),
             "thread_position_abs": to_int(raw.get("thread_position_abs"), index),
-            "thread_position_rel": to_float(
-                raw.get("thread_position_rel"),
-                index / thread_size if thread_size else 0.0,
-            ),
-            "num_previous_comments": previous_comment_count,
-
+            "thread_size": thread_size,
+            "thread_position_rel": to_float(raw.get("thread_position_rel"), index / thread_size if thread_size else 0.0),
+            "num_previous_comments": previous_comments_count,
+            "is_thread_start": int(comment_id == root_comment_id or index == 1),
+            "is_reply": int(bool(parent_id)),
+            "previous_comment_exists": int(index > 1),
+            "time_since_thread_start": time_since_thread_start,
+            "time_since_previous_comment": time_since_previous_comment,
+            "user_thread_comment_count_before": user_count_before,
+            "user_thread_comment_count_total": login_count_total,
+            "user_previous_thread_share": user_previous_thread_share,
+            "reply_depth": to_int(raw.get("reply_depth"), 1 if parent_id else 0),
+            "num_children": to_int(raw.get("num_children"), children_by_parent.get(comment_id, 0)),
+            "parent_is_root": to_int(raw.get("parent_is_root"), int(parent_id == root_comment_id)),
+            "is_target_login_numeric": int(str(raw.get("target_login")).isdigit()) if raw.get("target_login") is not None else 0,
+            "thread_user_count": thread_user_count,
+            "thread_comment_count": thread_size,
+            "thread_mean_comments_per_user": thread_mean_comments_per_user,
+            "thread_max_comments_by_one_user": thread_max_comments_by_one_user,
+            "thread_single_comment_user_count": thread_single_comment_user_count,
+            "thread_max_user_share": thread_max_user_share,
+            "thread_single_comment_user_share": thread_single_comment_user_share,
+            "log_time_since_thread_start": math.log1p(max(0.0, time_since_thread_start)),
+            "log_time_since_previous_comment": math.log1p(max(0.0, time_since_previous_comment)),
+            "previous_comment_attack": previous_comment_attack,
+            "prev_attack_count": prev_attack_count,
             "prev_attack_rate": prev_attack_rate,
             "prev_toxicity_score_mean": prev_toxicity_score_mean,
-            "prev_attack_count": prev_attack_count,
             "prev_toxicity_score_max": prev_toxicity_score_max,
             "prev_attack_score_max": prev_attack_score_max,
-            "recent_attack_rate_3": recent_attack_rate_3,
-            "recent_attack_rate_5": recent_attack_rate_5,
-            "attack_streak_current": attack_streak_current,
-            "target_recently_attacked": to_int(raw.get("target_recently_attacked"), 0),
-            "reply_after_attack": to_int(
-                raw.get("reply_after_attack"),
-                previous_attack_flags[-1] if previous_attack_flags else 0,
-            ),
-            "target_response_context_score": to_float(raw.get("target_response_context_score"), 0.0),
-
-            "predicted_synthetic_role": role,
-            "predicted_synthetic_role_label": role_label,
+            "recent_attack_rate_3": to_float(raw.get("recent_attack_rate_3")),
+            "recent_attack_rate_5": to_float(raw.get("recent_attack_rate_5")),
+            "attack_streak_current": to_int(raw.get("attack_streak_current")),
+            "target_recently_attacked": to_int(raw.get("target_recently_attacked")),
+            "reply_after_attack": to_int(raw.get("reply_after_attack")),
+            "target_response_context_score": to_float(raw.get("target_response_context_score")),
+            "source_file": raw.get("source_file", thread_meta.get("source_file")),
             "source_platform": raw.get("source_platform", thread_data.get("platform")),
-            "analysis_saved_at": raw.get("analysis_saved_at"),
-            "prob_class_1": to_float(prediction_value(raw, "prob_class_1"), 0.0),
-            "prob_class_2": to_float(prediction_value(raw, "prob_class_2"), 0.0),
-            "prob_class_3": to_float(prediction_value(raw, "prob_class_3"), 0.0),
-            "prob_class_4": to_float(prediction_value(raw, "prob_class_4"), 0.0),
-            "prob_class_5": to_float(prediction_value(raw, "prob_class_5"), 0.0),
-            "prob_class_6": to_float(prediction_value(raw, "prob_class_6"), 0.0),
-            "prob_class_7": to_float(prediction_value(raw, "prob_class_7"), 0.0),
-
-            # Optionale Metadaten bleiben erhalten, sind aber keine Pflichtfelder
-            # des Aggregators mehr.
-            "subject": raw.get("subject", ""),
-            "target_login": raw.get("target_login"),
             "source_type": raw.get("source_type", thread_meta.get("source_type")),
             "thread_title": raw.get("thread_title", thread_meta.get("title")),
             "scenario_type": raw.get("scenario_type", thread_meta.get("scenario_type")),
             "label_shitstorm": raw.get("label_shitstorm", thread_meta.get("label_shitstorm")),
             "toxicity_level": raw.get("toxicity_level"),
+            "predicted_synthetic_role": get_role(raw),
+            "predicted_synthetic_role_label": get_role_label(raw),
+            "prob_class_1": to_float(ml_prediction.get("prob_class_1", get_probability(raw, "prob_class_1"))),
+            "prob_class_2": to_float(ml_prediction.get("prob_class_2", get_probability(raw, "prob_class_2"))),
+            "prob_class_3": to_float(ml_prediction.get("prob_class_3", get_probability(raw, "prob_class_3"))),
+            "prob_class_4": to_float(ml_prediction.get("prob_class_4", get_probability(raw, "prob_class_4"))),
+            "prob_class_5": to_float(ml_prediction.get("prob_class_5", get_probability(raw, "prob_class_5"))),
+            "prob_class_6": to_float(ml_prediction.get("prob_class_6", get_probability(raw, "prob_class_6"))),
+            "prob_class_7": to_float(ml_prediction.get("prob_class_7", get_probability(raw, "prob_class_7"))),
+            "analysis_saved_at": raw.get("analysis_saved_at"),
+            "ml_prediction": ml_prediction,
+            "llm_metrics": llm_metrics,
             "raw_comment": raw,
         }
 
-        missing = [field for field in STANDARD_REQUIRED_FIELDS if field not in standard_comment]
-        if missing:
-            raise KeyError(
-                "Interner Fehler: Evaluation hat kein vollständiges Standardformat gebaut. "
-                f"Fehlend: {missing}"
-            )
-
-        for field in NUMERIC_FIELDS:
-            standard_comment[field] = to_float(standard_comment.get(field), 0.0)
-
-        for field in INTEGER_FIELDS:
-            standard_comment[field] = to_int(standard_comment.get(field), 0)
-
-        prepared.append(standard_comment)
-
+        prepared.append(prepared_comment)
         previous_attack_flags.append(is_attacking)
         previous_toxicity_scores.append(toxicity_score)
         previous_attack_scores.append(attack_score)
@@ -586,18 +402,41 @@ def prepare_comments_for_warning_service(
     return prepared
 
 
+def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
+    if not rows:
+        return
+    with path.open("w", encoding="utf-8", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 def evaluate_thread_payload(
     thread_data: dict[str, Any],
     output_dir: str | Path = "evaluation_results",
     run_name: str | None = None,
+    window_minutes: int = 5,
+    rolling_window_size: int = 5,
+    min_history: int = 3,
+    z_watch: float = 1.0,
+    z_full: float = 3.0,
+    cusum_reference: float = 0.5,
+    cusum_watch: float = 1.5,
+    cusum_full: float = 5.0,
+    watch_threshold: float = 0.20,
+    warning_threshold: float = 0.40,
+    critical_threshold: float = 0.60,
 ) -> dict[str, Any]:
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    if min_history > rolling_window_size:
+        raise ValueError("min_history darf nicht größer als rolling_window_size sein.")
+    if not (watch_threshold <= warning_threshold <= critical_threshold):
+        raise ValueError("Erwartet: watch_threshold <= warning_threshold <= critical_threshold.")
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
 
-    raw_comments = thread_data.get("comments")
-
-    if not isinstance(raw_comments, list) or not raw_comments:
-        raise ValueError("API-Response muss top-level 'comments' als nicht-leere Liste enthalten.")
+    raw_comments = get_raw_comments(thread_data)
+    if not raw_comments:
+        raise ValueError("comments-Liste ist leer.")
 
     thread_meta = get_thread_meta(thread_data)
     thread_id = get_thread_id(thread_data, raw_comments)
@@ -610,22 +449,27 @@ def evaluate_thread_payload(
     comments = prepare_comments_for_warning_service(thread_data)
 
     service = ModerationWarningService(
-        window_minutes=5,
-        history_window_size=3,
+        window_minutes=window_minutes,
+        rolling_window_size=rolling_window_size,
+        min_history=min_history,
+        z_watch=z_watch,
+        z_full=z_full,
+        cusum_reference=cusum_reference,
+        cusum_watch=cusum_watch,
+        cusum_full=cusum_full,
+        watch_threshold=watch_threshold,
+        warning_threshold=warning_threshold,
+        critical_threshold=critical_threshold,
     )
 
-    # Keine LLM-Gegenrede während Evaluation.
     if hasattr(service, "counter_speech_selector"):
-        service.counter_speech_selector.should_generate_counter_speech = (
-            lambda *args, **kwargs: False
-        )
+        service.counter_speech_selector.should_generate_counter_speech = lambda *args, **kwargs: False
 
     rows: list[dict[str, Any]] = []
     raw_outputs: list[dict[str, Any]] = []
 
     for index, comment in enumerate(comments, start=1):
         output = service.process_comment(comment)
-
         prediction = output["shitstorm_prediction"]
         metrics = output["current_window_metrics"]
         dimensions = get_dimension_scores(prediction)
@@ -633,27 +477,15 @@ def evaluate_thread_payload(
 
         row = {
             "nr": index,
-            "comment_id": comment.get("comment_id", ""),
+            "comment_id": comment.get("comment_id", comment.get("id", "")),
             "created_at": comment.get("created_at", ""),
             "window_start": metrics.get("window_start", ""),
+            "window_end": metrics.get("window_end", ""),
             "comment_count": metrics.get("comment_count", 0),
             "unique_users": metrics.get("unique_users", 0),
-            "dominant_user_ratio": metrics.get("dominant_user_ratio", 0),
             "attack_count": metrics.get("attack_count", 0),
             "attack_ratio": metrics.get("attack_ratio", 0),
-            "attack_score_mean": metrics.get("attack_score_mean", 0),
-            "attack_score_mean_norm": metrics.get("attack_score_mean_norm", 0),
-            "attack_probability_mean": metrics.get("attack_probability_mean", 0),
-            "toxic_count": metrics.get("toxic_count", 0),
             "toxic_ratio": metrics.get("toxic_ratio", 0),
-            "toxicity_score_mean": metrics.get("toxicity_score_mean", 0),
-            "toxicity_score_mean_norm": metrics.get("toxicity_score_mean_norm", 0),
-            "insult_ratio": metrics.get("insult_ratio", 0),
-            "negative_word_count_mean": metrics.get("negative_word_count_mean", 0),
-            "recent_attack_rate_3_mean": metrics.get("recent_attack_rate_3_mean", 0),
-            "recent_attack_rate_5_mean": metrics.get("recent_attack_rate_5_mean", 0),
-            "attack_streak_max": metrics.get("attack_streak_max", 0),
-            "reply_after_attack_ratio": metrics.get("reply_after_attack_ratio", 0),
             "freq": dimensions["frequency"],
             "aggr": dimensions["aggression_toxicity"],
             "dyn": dimensions["dynamics"],
@@ -661,95 +493,104 @@ def evaluate_thread_payload(
             "score_0_1": score_0_1,
             "score_0_100": score_0_100,
             "warning_level": prediction.get("warning_level", ""),
+            "evaluation_status": prediction.get("evaluation_status", ""),
+            "has_sufficient_history": prediction.get("has_sufficient_history", False),
+            "warning_reason": (prediction.get("warning_decision", {}) or {}).get("reason", ""),
+            "score_raw_0_1": prediction.get("score_raw_0_1", 0),
+            "score_final_0_1": prediction.get("score_final_0_1", score_0_1),
+            "aggression_cap_0_1": prediction.get("aggression_cap_0_1", 0),
+            "cap_applied": prediction.get("cap_applied", False),
         }
-
         rows.append(row)
         raw_outputs.append(output)
 
+    windows = collect_aggregated_windows(service)
+
+    rows_csv_path = output_path / f"{run_name}_rows.csv"
+    windows_csv_path = output_path / f"{run_name}_windows.csv"
+    summary_json_path = output_path / f"{run_name}_summary.json"
+    details_json_path = output_path / f"{run_name}_details.json"
+
+    _write_csv(rows_csv_path, rows)
+    _write_csv(windows_csv_path, windows)
+
+    scoring_config = {
+        "method": "rolling_z_cusum_aggression_cap_thresholds",
+        "absolute_fallback": False,
+        "aggression_cap": True,
+        "warning_logic": "thresholds_on_final_aggression_capped_barometer",
+        "window_minutes": window_minutes,
+        "rolling_window_size": rolling_window_size,
+        "min_history": min_history,
+        "z_watch": z_watch,
+        "z_full": z_full,
+        "cusum_reference": cusum_reference,
+        "cusum_watch": cusum_watch,
+        "cusum_full": cusum_full,
+        "watch_threshold": watch_threshold,
+        "warning_threshold": warning_threshold,
+        "critical_threshold": critical_threshold,
+    }
+
     worst_level = max(
         (row["warning_level"] for row in rows),
-        key=lambda level: LEVEL_ORDER.get(level, 0),
+        key=lambda level: LEVEL_ORDER.get(str(level), 0),
+        default="normal",
     )
-
-    final_row = rows[-1]
-    max_score_row = max(rows, key=lambda row: row["score_0_100"])
+    final_row = rows[-1] if rows else {}
+    max_score_row = max(rows, key=lambda row: row["score_0_100"], default={})
 
     summary = {
         "status": "success",
-        "evaluation_mode": "new_standard_variables_direct",
         "platform": thread_data.get("platform"),
-        "source_collection": thread_data.get("source_collection"),
         "thread_id": thread_id,
         "source_file": thread_meta.get("source_file"),
         "source_platform": thread_meta.get("source_platform"),
         "source_type": thread_meta.get("source_type"),
         "title": thread_meta.get("title"),
-
         "comments_count_api": thread_data.get("comments_count"),
         "comments_count_thread_meta": thread_meta.get("comments_count"),
         "comments_count_evaluated": len(comments),
-
-        "final_warning_level": final_row["warning_level"],
+        "windows_count_evaluated": len(windows),
+        "final_warning_level": final_row.get("warning_level", "normal"),
+        "final_evaluation_status": final_row.get("evaluation_status", ""),
         "worst_warning_level": worst_level,
-        "final_score_0_1": final_row["score_0_1"],
-        "final_score_0_100": final_row["score_0_100"],
-
-        "max_score_0_100": max_score_row["score_0_100"],
-        "max_score_comment_id": max_score_row["comment_id"],
-        "max_score_warning_level": max_score_row["warning_level"],
-
+        "final_score_0_1": final_row.get("score_0_1", 0.0),
+        "final_score_0_100": final_row.get("score_0_100", 0.0),
+        "max_score_0_100": max_score_row.get("score_0_100", 0.0),
+        "max_score_comment_id": max_score_row.get("comment_id"),
+        "max_score_warning_level": max_score_row.get("warning_level"),
         "label_shitstorm": thread_meta.get("label_shitstorm"),
         "scenario_type": thread_meta.get("scenario_type"),
         "generated_at": datetime.now().isoformat(timespec="seconds"),
     }
 
-    print("\n" + "=" * 120)
-    print(f"Thread: {thread_id}")
-    print(f"Platform: {thread_data.get('platform')}")
-    print(f"Source file: {thread_meta.get('source_file')}")
-    print(f"Title: {thread_meta.get('title')}")
-    print(f"Evaluated comments: {len(comments)}")
-    print("Input format: new_standard_variables_direct")
-    print("=" * 120 + "\n")
-    print(format_table(rows))
+    with summary_json_path.open("w", encoding="utf-8") as file:
+        json.dump({"scoring_config": scoring_config, "summary": summary}, file, indent=2, ensure_ascii=False)
 
-    summary_path = output_dir / f"{run_name}_summary.json"
-    details_path = output_dir / f"{run_name}_details.json"
-
-    with summary_path.open("w", encoding="utf-8") as file:
-        json.dump(summary, file, indent=2, ensure_ascii=False)
-
-    with details_path.open("w", encoding="utf-8") as file:
+    with details_json_path.open("w", encoding="utf-8") as file:
         json.dump(
             {
+                "scoring_config": scoring_config,
                 "summary": summary,
                 "rows": rows,
+                "windows": windows,
                 "raw_outputs": raw_outputs,
-                "prepared_comments_standard_format": comments,
             },
             file,
             indent=2,
             ensure_ascii=False,
         )
 
-    window_report = save_window_report_json(
-        service=service,
-        output_dir=output_dir,
-        run_name=run_name,
-    )
-
-    print("\nGespeichert:")
-    print(f"- {summary_path}")
-    print(f"- {details_path}")
-    print(f"- {window_report['path']}")
-
     return {
+        "scoring_config": scoring_config,
         "summary": summary,
         "files": {
-            "summary_json": str(summary_path),
-            "details_json": str(details_path),
-            "windows_json": window_report["path"],
+            "summary_json": str(summary_json_path),
+            "details_json": str(details_json_path),
+            "rows_csv": str(rows_csv_path),
+            "windows_csv": str(windows_csv_path),
         },
         "rows": rows,
-        "windows": window_report["windows"],
+        "windows": windows,
     }
