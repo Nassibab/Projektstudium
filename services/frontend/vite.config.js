@@ -4,9 +4,13 @@ import vue from '@vitejs/plugin-vue'
 export default defineConfig({
   plugins: [vue()],
   server: {
+    host: '0.0.0.0',
+    port: 3000,
+    watch: {
+      usePolling: true,
+    },
     proxy: {
-      '/api': { target: 'http://api:8000', changeOrigin: true },
-      '/evaluate-thread': { 
+      '/moderation': { 
         target: 'http://moderation:8000',
         changeOrigin: true
       }
