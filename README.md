@@ -491,3 +491,344 @@ bluesky_prediction_*_results
 
 
 
+# Shitstorm Moderation Service
+
+Dieser Service bewertet Kommentare und Threads auf mögliche Shitstorm-Dynamiken.  
+Er berechnet ein Shitstorm-Barometer, gibt Warnstufen zurück und kann bei Bedarf Gegenrede / Counter Speech erzeugen.
+
+Der Service basiert auf FastAPI.
+
+---
+
+## Starten
+
+Im Projektverzeichnis:
+
+```bash
+docker compose up --build
+```
+
+Oder falls der Container bereits gebaut wurde:
+
+```bash
+docker compose up
+```
+
+Die API läuft standardmäßig unter:
+
+```text
+http://localhost:8000
+```
+
+---
+
+## Wichtige Umgebungsvariablen
+
+Für die Counter-Speech-Generierung wird ein LLM-Zugang benötigt.
+
+```env
+LLMAPI_KEY=dein_api_key
+COUNTER_SPEECH_MODEL=gpt-oss-120b
+API_BASE_URL=http://api:8000
+```
+
+`LLMAPI_KEY` ist nötig, wenn echte Gegenrede generiert werden soll.  
+`COUNTER_SPEECH_MODEL` ist optional. Wenn nichts gesetzt ist, wird standardmäßig `gpt-oss-120b` verwendet.
+
+---
+
+# Endpoints
+
+## 1. Health Check
+
+```http
+GET /
+```
+
+Prüft, ob der Moderation-Service läuft.
+
+### Beispiel
+
+```bash
+curl http://localhost:8000/
+```
+
+### Beispiel-Response
+
+```json
+{
+  "message": "Moderation Service is running"
+}
+```
+
+---
+
+## 2. Einzelnen Kommentar live moderieren
+
+```http
+POST /moderation/comment
+```
+
+Dieser Endpoint verarbeitet einen einzelnen Kommentar.  
+Der Kommentar wird in ein Zeitfenster einsortiert, aggregiert und anschließend mit dem Shitstorm-Scorer bewertet.
+
+### Verwendung
+
+```bash
+curl -X POST "http://localhost:8000/moderation/comment" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "comment_id": "9000165",
+    "thread_id": "SYN0001",
+    "login": "USR0211",
+    "text": "Das ist alles andere als normal!",
+    "created_at": "2026-01-02 03:09:00",
+    "parent_id": "9000001",
+
+    "irony": 0,
+    "attack_score": 1,
+    "toxicity_score": 1,
+    "swearword_count": 0,
+    "negative_word_count": 0,
+    "insult_count": 0,
+    "direct_address_count": 0,
+    "imperative_count": 2,
+    "accusation_marker_count": 0,
+    "mockery_marker_count": 0,
+    "is_attacking": 0,
+
+    "reply_depth": 1,
+    "parent_is_root": 1,
+    "num_children": 2,
+    "thread_position_abs": 354,
+    "thread_position_rel": 0.2939,
+    "num_previous_comments": 353,
+
+    "prev_attack_rate": 0.017,
+    "prev_toxicity_score_mean": 1.402,
+    "prev_attack_count": 6,
+    "prev_toxicity_score_max": 6,
+    "prev_attack_score_max": 6,
+
+    "recent_attack_rate_3": 0,
+    "recent_attack_rate_5": 0,
+    "attack_streak_current": 0,
+    "target_recently_attacked": 1,
+    "reply_after_attack": 0,
+    "target_response_context_score": 1,
+
+    "predicted_synthetic_role": "3",
+    "predicted_synthetic_role_label": null,
+
+    "prob_class_1": 0.0002,
+    "prob_class_2": 0.2082,
+    "prob_class_3": 0.7245,
+    "prob_class_4": 0.023,
+    "prob_class_5": 0.0395,
+    "prob_class_6": 0,
+    "prob_class_7": 0.0046
+  }'
+```
+
+### Wichtig
+
+Dieser Endpoint erwartet das vollständige Standardformat, weil der `WindowAggregator` viele Felder benötigt.
+
+Pflichtfelder sind unter anderem:
+
+```text
+comment_id
+thread_id
+login
+text
+created_at
+parent_id
+attack_score
+toxicity_score
+is_attacking
+reply_depth
+thread_position_abs
+recent_attack_rate_3
+recent_attack_rate_5
+target_recently_attacked
+reply_after_attack
+prob_class_1 bis prob_class_7
+```
+
+Wenn Felder fehlen, kann der Service mit einem Fehler abbrechen.
+
+### Beispiel-Response
+
+```json
+{
+  "status": "success",
+  "comment_id": "9000165",
+  "thread_id": "SYN0001",
+  "current_window_metrics": {
+    "thread_id": "SYN0001",
+    "window_start": "2026-01-02T03:05:00",
+    "window_end": "2026-01-02T03:10:00",
+    "comment_count": 1,
+    "unique_users": 1,
+    "attack_count": 0,
+    "attack_ratio": 0.0,
+    "toxic_count": 0,
+    "toxic_ratio": 0.0
+  },
+  "shitstorm_prediction": {
+    "barometer_score_0_1": 0.3605,
+    "shitstorm_barometer": 36.05,
+    "warning_level": "watch",
+    "evaluation_status": "ready"
+  },
+  "countermeasures": {
+    "level": "watch",
+    "actions": ["increase_monitoring"]
+  },
+  "counter_speech": {
+    "should_generate": false,
+    "reason": "Counter speech is not required for this comment.",
+    "generated_text": null,
+    "error": null
+  }
+}
+```
+
+---
+
+## 3. Live-Warning-Payload verarbeiten
+
+```http
+POST /moderation/warning
+```
+
+Dieser Endpoint ist für einen Live-Payload gedacht, der aus einem aktuellen Kommentar und vorherigen Kommentaren besteht.
+
+Er ist besonders nützlich, wenn zusätzlich zur Moderationsbewertung auch Kontext für Counter Speech übergeben werden soll.
+
+### Erwartetes Format
+
+```json
+{
+  "platform": "professor",
+  "source_file": "synthetic_shitstorm_dataset_3.json",
+  "thread": {
+    "thread_id": "SYN0001",
+    "title": "re",
+    "text": "Ausgangskommentar oder Thread-Kontext"
+  },
+  "latest_comment": {
+    "comment_id": "9000165",
+    "thread_id": "SYN0001",
+    "parent_id": "9000001",
+    "login": "USR0211",
+    "created_at": "2026-01-02 03:09:00",
+    "text": "Aktueller Kommentar",
+
+    "irony": 0,
+    "attack_score": 1,
+    "toxicity_score": 1,
+    "swearword_count": 0,
+    "negative_word_count": 0,
+    "insult_count": 0,
+    "direct_address_count": 0,
+    "imperative_count": 2,
+    "accusation_marker_count": 0,
+    "mockery_marker_count": 0,
+    "is_attacking": 0,
+
+    "reply_depth": 1,
+    "parent_is_root": 1,
+    "num_children": 2,
+    "thread_position_abs": 354,
+    "thread_position_rel": 0.2939,
+    "num_previous_comments": 353,
+
+    "prev_attack_rate": 0.017,
+    "prev_toxicity_score_mean": 1.402,
+    "prev_attack_count": 6,
+    "prev_toxicity_score_max": 6,
+    "prev_attack_score_max": 6,
+
+    "recent_attack_rate_3": 0,
+    "recent_attack_rate_5": 0,
+    "attack_streak_current": 0,
+    "target_recently_attacked": 1,
+    "reply_after_attack": 0,
+    "target_response_context_score": 1,
+
+    "predicted_synthetic_role": "3",
+    "predicted_synthetic_role_label": null,
+
+    "prob_class_1": 0.0002,
+    "prob_class_2": 0.2082,
+    "prob_class_3": 0.7245,
+    "prob_class_4": 0.023,
+    "prob_class_5": 0.0395,
+    "prob_class_6": 0,
+    "prob_class_7": 0.0046
+  },
+  "previous_comments": [
+    {
+      "comment_id": "9000002",
+      "parent_id": "9000001",
+      "login": "USR0348",
+      "created_at": "2026-01-01 12:11:00",
+      "text": "Vorheriger Kommentar 1"
+    },
+    {
+      "comment_id": "9000032",
+      "parent_id": "9000001",
+      "login": "USR0434",
+      "created_at": "2026-01-01 15:12:00",
+      "text": "Vorheriger Kommentar 2"
+    }
+  ]
+}
+```
+
+# Typischer Workflow
+
+
+## Evaluation eines gespeicherten Threads
+
+1. Thread liegt im API-Service vor.
+2. `/moderation/evaluate-thread/{thread_id}` wird aufgerufen.
+3. Service lädt den Thread über `API_BASE_URL`.
+4. Kommentare werden nacheinander verarbeitet.
+ 
+---
+
+## Counter Speech testen
+
+1. `LLMAPI_KEY` setzen.
+2. `/moderation/counter-speech/test` mit `previous_comments` aufrufen. 
+3. Für den nötigen JSON dies aufrufen: /moderation/thread/{thread_id}/latest-comment-contex
+
+
+---
+
+## Fehler: fehlender `LLMAPI_KEY`
+
+Wenn Counter Speech generiert werden soll, muss `LLMAPI_KEY` gesetzt sein.
+
+```env
+LLMAPI_KEY=dein_api_key
+```
+
+Ohne diesen Key kann die Shitstorm-Bewertung weiterhin funktionieren, aber die LLM-Gegenrede nicht.
+
+
+---
+
+# Kurzüberblick
+
+| Endpoint | Zweck |
+|---|---|
+| `GET /` | Health Check |
+| `POST /moderation/comment` | Einzelnen Kommentar vollständig bewerten |
+| `POST /moderation/warning` | Live-Payload mit aktuellem Kommentar und Verlauf verarbeiten |
+| `POST /moderation/counter-speech/test` | Nur Counter Speech testen |
+| `GET /moderation/evaluate-thread/{thread_id}` | Kompletten Thread aus API laden und evaluieren |
+
+
