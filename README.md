@@ -134,322 +134,191 @@ uvicorn app.main:app --app-dir . --host 0.0.0.0 --port 8000 --reload
 
 You're now ready to develop and run the API locally 🚀
 
+---
+
+# Shitstorm Detection System
+
+## Projektbeschreibung
+
+Dieses Projekt implementiert eine serviceorientierte Architektur zur Erkennung und Analyse von Shitstorms in Social-Media-Diskussionen. Unterstützt werden sowohl ein annotierter Professor-Datensatz als auch Live-Daten der Plattform Bluesky.
+
+Die Verarbeitung umfasst:
+
+- Import und Speicherung der Daten
+- LLM-basierte Merkmalsgenerierung
+- ML-basierte Vorhersage
+- Moderationsbewertung
+- optionale graphbasierte Visualisierung mit Neo4j
+
+---
+
+# Voraussetzungen
+
+## Verfügbare Services
+
+| Service | URL |
+|----------|-----|
+| API-Service | http://localhost:8000/docs |
+| Ingestion-Service | http://localhost:8001/docs |
+| LLM-Service | http://localhost:8011/docs |
+| Analyse-Engine | http://localhost:8020/__docs__/ |
+| Mongo Express | http://localhost:8081/db/shitstorm_db/ |
+| Neo4j Browser | http://localhost:7474 |
+
+---
 
 # 📊 Datenbank-Dokumentation
 
-## 1. Überblick
+## MongoDB
 
-Dieses Projekt verwendet eine **hybride Datenbankarchitektur**, bestehend aus:
+MongoDB dient als zentrale Datenbank zur Speicherung aller Rohdaten, Analysemerkmale und Vorhersageergebnisse.
 
-* **MongoDB** (NoSQL)
-  → Speicherung der Rohdaten (Threads, Kommentare, Analysen)
+### Mongo Express
 
-* **Neo4j** (Graphdatenbank)
-  → Modellierung von Beziehungen zwischen Nutzern, Kommentaren und Threads
+```
+http://localhost:8081/db/shitstorm_db/
+```
 
-Ziel ist es, sowohl strukturierte Daten effizient zu speichern als auch komplexe Interaktionen (z. B. Reply-Strukturen oder Nutzerbeziehungen) analysierbar zu machen.
+### Collections
+
+#### Rohdaten
+
+- threads
+- comments
+
+#### LLM-Analyse
+
+- llm_analysis_results
+
+#### Professor-Datensatz
+
+- professor_test_comment_results
+- professor_test_thread_results
+- professor_test_user_results
+- professor_test_model_results
+
+#### Bluesky
+
+- bluesky_prediction_comments_results
+- bluesky_prediction_thread_results
+- bluesky_prediction_user_results
+- bluesky_prediction_model_results
 
 ---
 
-## 2. Systemstart
+## Neo4j
 
-Alle Services werden über Docker gestartet:
+Neo4j dient der optionalen graphbasierten Darstellung der Beziehungen zwischen Datensätzen, Threads, Kommentaren und Nutzern.
 
-```bash
-docker-compose up -d --build
-```
-
-Gestartete Container:
-
-* `groupproject_api`
-* `groupproject_mongodb`
-* `groupproject_neo4j`
-
----
-
-## 3. MongoDB
-
-### 3.1 Verbindung
-
-```bash
-docker exec -it groupproject_mongodb mongosh
-```
-
-```js
-use shitstorm_db
-```
-
----
-
-### 3.2 Datenstruktur
-
-MongoDB speichert die Rohdaten in folgenden Collections:
-
-* `threads`
-* `comments`
-* `analysis_results`
-* `moderation_suggestions`
-* `alerts`
-
----
-
-### 3.3 Beispielabfragen
-
-Anzahl Threads:
-
-```js
-db.threads.countDocuments()
-```
-
-Anzahl Kommentare:
-
-```js
-db.comments.countDocuments()
-```
-
-Alle Threads anzeigen:
-
-```js
-db.threads.find().limit(5)
-```
-
-Kommentare zu einem Thread:
-
-```js
-db.comments.find({ thread_id: "THREAD_ID" })
-```
-
----
-
-## 4. Neo4j
-
-### 4.1 Zugriff
-
-Browser öffnen:
+### Browser
 
 ```
 http://localhost:7474
 ```
 
-Login:
+Login
 
 ```
 User: neo4j
 Password: password
 ```
 
----
-### 4.2 Datenmodell
+### Graphmodell
 
-### 🟢 Knoten (Nodes)
+#### Knoten
 
-Folgende Knotentypen werden verwendet:
+| Typ | Beschreibung |
+|------|--------------|
+| Dataset | Herkunft der Daten |
+| Thread | Diskussionsstrang |
+| Comment | Einzelner Kommentar |
+| User | Verfasser eines Kommentars |
 
-- **User**  
-  Repräsentiert einen Nutzer (z. B. Social Media Account)
-
-- **Comment**  
-  Einzelne Beiträge oder Kommentare innerhalb eines Threads
-
-- **Thread**  
-  Diskussionsstrang (z. B. Post + Kommentare)
-
-- **Dataset**  
-  Quelle der Daten (z. B. JSON-Datei oder externe Plattform wie Bluesky, Instagram)
-
----
-
-## 🔗 Beziehungen (Relationships)
+#### Beziehungen
 
 ```text
 (:Dataset)-[:CONTAINS_THREAD]->(:Thread)
+(:Thread)-[:CONTAINS_COMMENT]->(:Comment)
 (:User)-[:WROTE]->(:Comment)
-(:Comment)-[:IN_THREAD]->(:Thread)
 (:Comment)-[:REPLY_TO]->(:Comment)
 (:User)-[:REPLIED_TO_USER]->(:User)
 ```
----
-
-### 4.3 Beispielabfragen
-
-Alle Knoten:
-
-```cypher
-MATCH (n) RETURN n LIMIT 50;
-```
-
-Alle Beziehungen:
-
-```cypher
-MATCH p=()-[]->() RETURN p LIMIT 25;
-```
 
 ---
 
-User → Comments:
+## Synchronisation MongoDB → Neo4j
 
-```cypher
-MATCH (u:User)-[:WROTE]->(c:Comment)
-RETURN u, c LIMIT 50;
-```
-
-Kommentare → Threads:
-
-```cypher
-MATCH (c:Comment)-[:IN_THREAD]->(t:Thread)
-RETURN c, t LIMIT 50;
-```
-
-Antwortstrukturen:
-
-```cypher
-MATCH (c1:Comment)-[:REPLY_TO]->(c2:Comment)
-RETURN c1, c2 LIMIT 50;
-```
-
-User-Interaktionen:
-
-```cypher
-MATCH (u1:User)-[:REPLIED_TO_USER]->(u2:User)
-RETURN u1, u2 LIMIT 50;
-```
-
----
-
-## 5. Synchronisation (MongoDB → Neo4j)
-
-Die Daten werden über die API synchronisiert.
-
-### 5.1 Swagger UI
+Swagger
 
 ```
 http://localhost:8000/docs
 ```
 
----
+Synchronisation starten
 
-### 5.2 Endpoint
-
-```
+```http
 POST /sync/graph
 ```
 
-Alternativ per Terminal:
+Synchronisationsbericht
 
-```bash
-curl -X POST http://localhost:8000/sync/graph
+```http
+GET /report/threads
 ```
 
 ---
 
+# 🔄 Gesamtablauf der Datenverarbeitung
 
-## 6. Reset & Debugging
-
-### Neo4j komplett zurücksetzen
-
-```cypher
-MATCH (n) DETACH DELETE n;
-```
-
----
-
-### MongoDB prüfen
-
-```js
-db.comments.countDocuments()
-db.threads.countDocuments()
-```
-
----
-
-### Logs prüfen
-
-```bash
-docker-compose logs api --tail=100
-```
-
----
-
-
-# Shitstorm Detection System
-
-
-| Service | Swagger UI |
-|----------|----------|
-| API-Service | http://localhost:8000/docs |
-| Ingestion-Service | http://localhost:8001/docs |
-| LLM-Service | http://localhost:8011/docs |
-| Analyse-Engine |http://localhost:8020/__docs__/ |
-| Mongo Express | http://localhost:8081/db/shitstorm_db/ |
-| Neo4j Browser | http://localhost:7474 |
-
----
+Nachfolgend wird die Verarbeitung der beiden unterstützten Datenquellen beschrieben.
 
 # Professor-Datensatz
 
 ## 1. Professor-Datensatz importieren
 
-**Swagger**
+Swagger
 
 ```
 http://localhost:8000/docs
 ```
 
-**Endpoint**
+Endpoint
 
 ```http
 POST /import/professor
 ```
 
-### Funktion
+**Ergebnis**
 
-- Import der Professor-JSON-Dateien
-- Transformation der Daten
-- Speicherung in MongoDB
-
-### Collections
-
-- threads
-- comments
+- Import der JSON-Dateien
+- Speicherung in `threads`
+- Speicherung in `comments`
 
 ---
 
-## 2. Professor-LLM importieren
+## 2. LLM-Merkmale importieren
 
-Die LLM-Merkmale wurden bereits einmalig erzeugt und als JSON exportiert.
-
-**Swagger**
-
-```
-http://localhost:8000/docs
-```
-
-**Endpoint**
+Die LLM-Merkmale wurden bereits einmalig erzeugt und anschließend als JSON exportiert.
 
 ```http
 POST /analysis/import-professor-llm
 ```
 
-### Funktion
+**Ergebnis**
 
-- Import der LLM-Merkmale
-- Speicherung in MongoDB
-
-### Collection
-
-- llm_analysis_results
+- Speicherung in `llm_analysis_results`
 
 ---
 
-## 3. Vollständigen Trainingsdatensatz erzeugen
+## 3. Trainingsdatensatz erzeugen
 
-**Swagger**
+Swagger
 
 ```
 http://localhost:8000/docs
 ```
 
-Gesamter Datensatz
+Alle Threads
 
 ```http
 GET /analysis/training/prof-comments/all
@@ -461,7 +330,7 @@ Einzelner Thread
 GET /analysis/training/prof-comments/thread/{thread_id}
 ```
 
-### Zusammengeführt werden
+Verwendete Collections
 
 - threads
 - comments
@@ -471,7 +340,7 @@ GET /analysis/training/prof-comments/thread/{thread_id}
 
 ## 4. Modell trainieren
 
-**Swagger**
+Swagger
 
 ```
 http://localhost:8020/__docs__/
@@ -481,7 +350,7 @@ http://localhost:8020/__docs__/
 GET /train-full-model
 ```
 
-### Ergebnis
+Erzeugte Collections
 
 - professor_test_comment_results
 - professor_test_thread_results
@@ -490,7 +359,7 @@ GET /train-full-model
 
 ---
 
-# Bluesky
+# Bluesky-Daten
 
 ## 1. Bluesky-Stream starten
 
@@ -500,55 +369,43 @@ Swagger
 http://localhost:8001/docs
 ```
 
-Endpoint
-
 ```http
 GET /stream?url={post_url}
 ```
 
-### Funktion
+**Ergebnis**
 
-- Bluesky-Thread laden
+- Thread importieren
 - Kommentare speichern
 - Jetstream starten
-- Neue Kommentare überwachen
-
-### Collections
-
-- threads
-- comments
 
 ---
 
 ## 2. Automatische Verarbeitung
 
-Bei jedem neuen Kommentar wird automatisch folgender Endpoint aufgerufen:
+Bei jedem neu eingehenden Kommentar startet automatisch:
 
 ```http
 POST /pipeline/bluesky/comment-ingested
 ```
 
-Dieser startet automatisch:
-
-### LLM-Service
+### LLM-Analyse
 
 ```http
 POST http://llm-service:8011/analyze/thread
 ```
 
-Erzeugt
+Speichert
 
 - llm_analysis_results
 
----
-
-### Analyse-Engine
+### ML-Vorhersage
 
 ```http
 GET http://analyse-r:8000/predict-bluesky
 ```
 
-Erzeugt
+Speichert
 
 - bluesky_prediction_comments_results
 - bluesky_prediction_thread_results
@@ -557,38 +414,34 @@ Erzeugt
 
 ---
 
-## 3. Vollständigen Bluesky-Datensatz erzeugen
-
-Gesamter Datensatz
-
-```http
-GET /analysis/bluesky/prediction-data
-```
-
-Einzelner Thread
-
-```http
-GET /analysis/bluesky/prediction-data/{thread_id}
-```
-
----
-
-
 # Gesamtablauf
 
 ## Professor
 
 ```text
+Professor JSON
+      │
+      ▼
 POST /import/professor
-          │
-          ▼
+      │
+      ▼
+threads
+comments
+      │
+      ▼
 POST /analysis/import-professor-llm
-          │
-          ▼
+      │
+      ▼
+llm_analysis_results
+      │
+      ▼
 GET /analysis/training/prof-comments/all
-          │
-          ▼
+      │
+      ▼
 GET /train-full-model
+      │
+      ▼
+professor_test_*_results
 ```
 
 ---
@@ -597,34 +450,29 @@ GET /train-full-model
 
 ```text
 GET /stream?url=...
-
-        │
-        ▼
-
-Kommentare speichern
-
-        │
-        ▼
-
+      │
+      ▼
+Ingestion-Service
+      │
+      ▼
+threads
+comments
+      │
+      ▼
 POST /pipeline/bluesky/comment-ingested
-
-        │
-        ▼
-
-POST http://llm-service:8011/analyze/thread
-
-        │
-        ▼
-
-GET http://analyse-r:8000/predict-bluesky
-
-        │
-        ▼
-
-MongoDB aktualisieren
+      │
+      ▼
+POST /analyze/thread
+      │
+      ▼
+llm_analysis_results
+      │
+      ▼
+GET /predict-bluesky
+      │
+      ▼
+bluesky_prediction_*_results
 ```
-
----
 
 
 
