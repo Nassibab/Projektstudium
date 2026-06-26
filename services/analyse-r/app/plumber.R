@@ -70,10 +70,10 @@ function() {
 }
 
 
-#* Predict Bluesky synthetic roles as JSON
-#* @get /predict-bluesky
-function() {
-  predict_bluesky_synthetic_roles()
+#* Predict Bluesky synthetic roles for one thread
+#* @get /predict-bluesky/<thread_id>
+function(thread_id) {
+  predict_bluesky_synthetic_roles(thread_id)
 }
 
 

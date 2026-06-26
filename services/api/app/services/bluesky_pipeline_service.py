@@ -7,7 +7,6 @@ from app.services.llm_analysis_service import (
 
 ANALYSE_R_URL = os.getenv("ANALYSE_R_URL", "http://analyse-r:8000")
 
-
 def run_bluesky_comment_pipeline(thread_id: str, comment_id: str) -> dict:
     llm_result = analyze_one_bluesky_comment_with_llm_service(
         thread_id=thread_id,
@@ -15,7 +14,7 @@ def run_bluesky_comment_pipeline(thread_id: str, comment_id: str) -> dict:
     )
 
     predict_response = requests.get(
-        f"{ANALYSE_R_URL}/predict-bluesky",
+        f"{ANALYSE_R_URL}/predict-bluesky/{thread_id}",
         timeout=1200,
     )
     predict_response.raise_for_status()

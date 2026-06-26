@@ -2,12 +2,10 @@
 """
 Simple evaluation for one selected JSON thread.
 
-Usage examples:
+Examples:
   python evaluate_one_thread.py
   python evaluate_one_thread.py --thread evaluation_threads/thread_03_slow_escalation_shitstorm.json
-  python evaluate_one_thread.py --input evaluation_threads --output evaluation_one_thread_results
-
-The script prints one table row per processed comment.
+  python evaluate_one_thread.py --thread evaluation_threads/thread.json --window-minutes 10 --rolling-window-size 8
 """
 
 from __future__ import annotations
@@ -18,7 +16,9 @@ import json
 import sys
 from pathlib import Path
 from typing import Any
+
 from evaluation_window_report import print_and_save_aggregated_windows
+
 
 LEVEL_ORDER = {
     "normal": 0,
@@ -29,7 +29,6 @@ LEVEL_ORDER = {
 
 
 def add_project_root_to_path() -> None:
-    """Make `from app...` imports work when this file is run from inside app/."""
     script_path = Path(__file__).resolve()
     candidates = [
         script_path.parent,
@@ -43,7 +42,6 @@ def add_project_root_to_path() -> None:
             sys.path.insert(0, str(candidate))
             return
 
-    # Last resort: if the script itself is inside app/, add its parent.
     if script_path.parent.name == "app":
         sys.path.insert(0, str(script_path.parent.parent))
 
@@ -107,7 +105,6 @@ def choose_thread_file(input_dir: Path) -> Path:
 
 
 def get_score(prediction: dict[str, Any]) -> tuple[float, float]:
-    """Return score as 0..1 and 0..100 while supporting slightly different key names."""
     if "barometer_score_0_1" in prediction:
         score_0_1 = float(prediction["barometer_score_0_1"])
     elif "score_0_1" in prediction:
@@ -139,7 +136,6 @@ def get_dimension_scores(prediction: dict[str, Any]) -> dict[str, float]:
 
 
 def format_table(rows: list[dict[str, Any]], columns: list[tuple[str, str]]) -> str:
-    """Small dependency-free console table."""
     headers = [label for _, label in columns]
     table_rows = []
 
@@ -166,12 +162,24 @@ def format_table(rows: list[dict[str, Any]], columns: list[tuple[str, str]]) -> 
     return "\n".join(lines)
 
 
-def evaluate_one_thread(thread_file: Path, output_dir: Path) -> None:
+def evaluate_one_thread(
+    thread_file: Path,
+    output_dir: Path,
+    window_minutes: int = 5,
+    rolling_window_size: int = 5,
+    min_history: int = 3,
+) -> None:
+    if min_history > rolling_window_size:
+        raise ValueError("min_history darf nicht größer als rolling_window_size sein.")
+
     ModerationWarningService = import_service_class()
 
-    service = ModerationWarningService(window_minutes=5, history_window_size=3)
+    service = ModerationWarningService(
+        window_minutes=window_minutes,
+        rolling_window_size=rolling_window_size,
+        min_history=min_history,
+    )
 
-    # No LLM calls during evaluation.
     if hasattr(service, "counter_speech_selector"):
         service.counter_speech_selector.should_generate_counter_speech = lambda *args, **kwargs: False
 
@@ -190,7 +198,7 @@ def evaluate_one_thread(thread_file: Path, output_dir: Path) -> None:
 
         row = {
             "nr": index,
-            "comment_id": comment.get("id", ""),
+            "comment_id": comment.get("comment_id") or comment.get("id", ""),
             "created_at": comment.get("created_at", ""),
             "window_start": metrics.get("window_start", ""),
             "comment_count": metrics.get("comment_count", 0),
@@ -233,6 +241,7 @@ def evaluate_one_thread(thread_file: Path, output_dir: Path) -> None:
     print(f"Thread: {thread_file.name}")
     print(f"Scenario: {thread_data.get('scenario_name', '-')}")
     print(f"Label Shitstorm: {thread_data.get('label_shitstorm', '-')}")
+    print(f"Fenstergröße: {window_minutes} min | Rolling-Fenster: {rolling_window_size} | min_history: {min_history}")
     print("=" * 100 + "\n")
     print(format_table(rows, columns))
 
@@ -242,12 +251,27 @@ def evaluate_one_thread(thread_file: Path, output_dir: Path) -> None:
         writer.writerows(rows)
 
     with json_path.open("w", encoding="utf-8") as file:
-        json.dump({"thread_file": str(thread_file), "rows": rows, "raw_outputs": raw_outputs}, file, indent=2, ensure_ascii=False)
+        json.dump(
+            {
+                "thread_file": str(thread_file),
+                "scoring_config": {
+                    "method": "rolling_z_cusum",
+                    "window_minutes": window_minutes,
+                    "rolling_window_size": rolling_window_size,
+                    "min_history": min_history,
+                },
+                "rows": rows,
+                "raw_outputs": raw_outputs,
+            },
+            file,
+            indent=2,
+            ensure_ascii=False,
+        )
 
     print("\nGespeichert:")
     print(f"- {csv_path}")
     print(f"- {json_path}")
-    
+
     print_and_save_aggregated_windows(
         service=service,
         output_dir=output_dir,
@@ -255,12 +279,14 @@ def evaluate_one_thread(thread_file: Path, output_dir: Path) -> None:
     )
 
 
-
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Evaluate exactly one JSON thread and print one result row per comment.")
+    parser = argparse.ArgumentParser(description="Evaluate exactly one JSON thread with Rolling-z/CUSUM scoring.")
     parser.add_argument("--input", type=Path, default=None, help="Folder containing JSON thread files")
     parser.add_argument("--thread", type=Path, default=None, help="Specific JSON thread file to evaluate")
     parser.add_argument("--output", type=Path, default=Path("evaluation_one_thread_results"), help="Output folder")
+    parser.add_argument("--window-minutes", type=int, default=5, help="Aggregation window size in minutes")
+    parser.add_argument("--rolling-window-size", type=int, default=5, help="Number of previous windows for rolling z/CUSUM")
+    parser.add_argument("--min-history", type=int, default=3, help="Minimum previous windows before relative scoring")
     args = parser.parse_args()
 
     if args.thread is not None:
@@ -274,8 +300,13 @@ def main() -> None:
     if not thread_file.exists():
         raise FileNotFoundError(thread_file)
 
-    evaluate_one_thread(thread_file, args.output)
-
+    evaluate_one_thread(
+        thread_file=thread_file,
+        output_dir=args.output,
+        window_minutes=args.window_minutes,
+        rolling_window_size=args.rolling_window_size,
+        min_history=args.min_history,
+    )
 
 
 if __name__ == "__main__":

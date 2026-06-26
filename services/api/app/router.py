@@ -18,7 +18,11 @@ from app.importers.professor_json_importer import import_json
 from app.database_services.mongo_data_service import (
      get_all_comments_for_analysis,
      save_analysis_results,
-     get_bluesky_comments_for_prediction
+     get_bluesky_comments_for_prediction,
+     get_bluesky_thread_for_prediction,
+     get_professor_comments_for_analysis_by_thread,
+     get_latest_moderation_thread,
+     get_latest_comment_context_for_thread
 )
 from app.importers.professor_llm_json_importer import import_professor_llm_dataset
 from app.services.redis_events import iter_thread_updates, publish_thread_update
@@ -179,6 +183,151 @@ def get_all_analysis_comments():
 @router.get("/analysis/bluesky/prediction-data")
 def bluesky_prediction_data():
     return get_bluesky_comments_for_prediction()
+
+
+
+
+#------------------------------------------------------------------------------------
+# ladet nur Kommentare mit LLM-Features zu genau einem Bluesky-Thread 
+#------------------------------------------------------------------------------------
+
+@router.get("/analysis/bluesky/prediction-data/{thread_id:path}")
+def bluesky_prediction_data_for_thread(thread_id: str):
+    result = get_bluesky_thread_for_prediction(thread_id)
+
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Kein Bluesky Thread mit thread_id={thread_id} gefunden",
+        )
+
+    return result
+
+
+
+#------------------------------------------------------------------------------------
+# ladet nur Kommentare mit LLM-Features zu genau einem Professor-Thread 
+#------------------------------------------------------------------------------------
+
+
+@router.get("/analysis/training/prof-comments/thread/{thread_id}")
+def get_professor_analysis_comments_by_thread(
+    thread_id: str,
+    source_file: str | None = Query(default=None),
+):
+    result = get_professor_comments_for_analysis_by_thread(
+        thread_id=thread_id,
+        source_file=source_file,
+    )
+
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Kein Professor-Thread mit thread_id={thread_id} gefunden",
+        )
+
+    return result
+
+
+
+
+# ------------------------------------------------------------------------------
+# Liefert einen Thread für Moderation:
+# Kommentare + LLM-Metriken + ML-Predictions
+# ------------------------------------------------------------------------------
+@router.get("/moderation/thread/{thread_id}")
+def get_thread_for_moderation(
+    thread_id: str,
+    platform: str = Query(..., description="bluesky oder professor"),
+    source_file: str | None = Query(default=None),
+):
+    result = get_latest_moderation_thread(
+        thread_id=thread_id,
+        platform=platform,
+        source_file=source_file,
+    )
+
+    if isinstance(result, dict) and result.get("error") == "invalid_platform":
+        raise HTTPException(status_code=400, detail=result["message"])
+
+    if isinstance(result, dict) and result.get("error") == "ambiguous_thread":
+        raise HTTPException(status_code=400, detail=result)
+
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Kein Moderation-Thread gefunden für platform={platform}, thread_id={thread_id}",
+        )
+
+    return result
+
+
+
+#1. Nimm die zuletzt gespeicherte ML-Prediction.
+#2. Finde dazu den Original-Kommentar.
+#3. Lade für genau diesen Kommentar die LLM-Metriken.
+#4. Lade aus demselben Thread alle Kommentare davor.
+#5. Gib bei den vorherigen Kommentaren nur den Text zurück.
+
+@router.get("/moderation/thread/{thread_id}/latest-comment-context")
+def latest_comment_context_for_thread(
+    thread_id: str,
+    platform: str = Query(..., description="bluesky oder professor"),
+    source_file: str | None = Query(default=None),
+):
+    result = get_latest_comment_context_for_thread(
+        thread_id=thread_id,
+        platform=platform,
+        source_file=source_file,
+    )
+
+    if isinstance(result, dict) and result.get("error") == "invalid_platform":
+        raise HTTPException(
+            status_code=400,
+            detail=result["message"],
+        )
+
+    if isinstance(result, dict) and result.get("error") == "ambiguous_thread":
+        raise HTTPException(
+            status_code=400,
+            detail=result,
+        )
+
+    if isinstance(result, dict) and result.get("error") in [
+        "thread_not_found",
+        "ml_prediction_not_found",
+        "comment_not_found",
+    ]:
+        raise HTTPException(
+            status_code=404,
+            detail=result,
+        )
+
+    return result
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 # ------------------------------------------------------------------------------
 # Ergebnisse, die von R-Service an die API zurückgegeben werden
