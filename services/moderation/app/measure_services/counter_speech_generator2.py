@@ -33,21 +33,29 @@ if __name__ == "__main__":
 
     PROMPTS = {
         "Deeskalations_Strategie": """
-        Du bist Moderationsassistent. Erstelle eine konstruktive Gegenrede, um die gesamte Diskussion zu deeskalieren.
+        *Rolle*
+        Du bist ein Moderationsassistent zur Unterstützung der Erkennung und Deeskalation von Shitstorms. 
+        Deine Aufgabe besteht darin, auf Grundlage eines Diskussionsverlaufs eine deeskalierende Gegenrede zu generieren.
 
-        Dir wird der Ausgangskommentar (root bzw. Parent) und der darauffolgende Diskussionsverlauf (die "Kinder"-Kommentare) übergeben.
-        Führe vor der Antwort eine strukturierte Chain-of-Thought- und Self-Consistency-Analyse im Geist durch:        
-        1. Analysiere die Dynamik, das Eskalationspotenzial und versteckte Aggressivität/Ironie im gesamten Verlauf.
-        2. Entwirf intern drei unterschiedliche deeskalierende Antwortstrategien (Self consistency).
-        3. Vergleiche diese Entwürfe und wähle denjenigen aus, der psychologisch am stärksten deeskalierend auf die Dynamik wirkt, ohne belehrend zu klingen.
-        
-        Anforderungen, an die du dich strikt hältst:
-        - Bleibe höflich und respektvoll.
-        - Deeskaliere die Situation bezogen auf den gesamten Verlauf.
-        - Maximum 3 Sätze.
-        - Gebe keine einleitenden Sätze aus.
-        - Gib NUR die endgültige Antwort aus.
-        - Stelle in deiner Antwort keine Fragen.
+        *Denke Schritt für Schritt nach*
+        1. Analysiere die Dynamik und den Kontext um den es sich handelt
+        2. erkenne die Emotionen
+        3. Bewerte den Eskalationsgrad
+        4. Entwerfe drei unterschiedliche deeskalierende Antwortstrategien
+        5. Vergleiche die unterschiedlichen Strategien hinsichtlich Empathie, Neutralität, Sachlichkeit und Deeskalationspotenzial
+        6. Leite daraus die am besten geeignetste Deeskalationsstrategie ab
+        7. Generiere die finale Gegenrede
+
+        *Anforderungen*
+        - gebe NUR die finale Gegenrede aus
+        - maximal 4 Sätze
+        - neutral
+        - sei nicht belehrend
+        - keine Partei bevorzugen
+        - empathisch und erklärend (situationsabhängig)
+        - sachliche Diskussion fördern
+        - Verwende einen natürlichen Sprachstil
+        - Verzichte auf standardisierte Floskeln, Dankesformeln und generische Formulierungen
         
         CONTEXT (Ausgangskommentar des Parents):
         {thread_context}
@@ -67,10 +75,10 @@ if __name__ == "__main__":
         "GaleneAI/Magistral-Small-2509-FP8-Dynamic",
         "RedHatAI/gemma-4-31B-it-FP8-block",
         "MiniMaxAI/MiniMax-M3-MXFP8", 
-        "moonshotai/Kimi-K2.6", 
         "google/gemma-4-E4B-it",
-        "Qwen/Qwen3.6-35B-A3B-FP8", 
-        "deepseek-ai/DeepSeek-V4-Flash",
+        "Qwen/Qwen3.6-35B-A3B-FP8",
+        "moonshotai/Kimi-K2.6",
+        "deepseek-ai/DeepSeek-V4-Flash"
     ]
 
     # Daten werden geladen
