@@ -371,5 +371,262 @@ docker-compose logs api --tail=100
 ---
 
 
+# Shitstorm Detection System
+
+
+| Service | Swagger UI |
+|----------|----------|
+| API-Service | http://localhost:8000/docs |
+| Ingestion-Service | http://localhost:8001/docs |
+| LLM-Service | http://localhost:8011/docs |
+| Analyse-Engine |http://localhost:8020/__docs__/ |
+| Mongo Express | http://localhost:8081/db/shitstorm_db/ |
+| Neo4j Browser | http://localhost:7474 |
+
+---
+
+# Professor-Datensatz
+
+## 1. Professor-Datensatz importieren
+
+**Swagger**
+
+```
+http://localhost:8000/docs
+```
+
+**Endpoint**
+
+```http
+POST /import/professor
+```
+
+### Funktion
+
+- Import der Professor-JSON-Dateien
+- Transformation der Daten
+- Speicherung in MongoDB
+
+### Collections
+
+- threads
+- comments
+
+---
+
+## 2. Professor-LLM importieren
+
+Die LLM-Merkmale wurden bereits einmalig erzeugt und als JSON exportiert.
+
+**Swagger**
+
+```
+http://localhost:8000/docs
+```
+
+**Endpoint**
+
+```http
+POST /analysis/import-professor-llm
+```
+
+### Funktion
+
+- Import der LLM-Merkmale
+- Speicherung in MongoDB
+
+### Collection
+
+- llm_analysis_results
+
+---
+
+## 3. Vollständigen Trainingsdatensatz erzeugen
+
+**Swagger**
+
+```
+http://localhost:8000/docs
+```
+
+Gesamter Datensatz
+
+```http
+GET /analysis/training/prof-comments/all
+```
+
+Einzelner Thread
+
+```http
+GET /analysis/training/prof-comments/thread/{thread_id}
+```
+
+### Zusammengeführt werden
+
+- threads
+- comments
+- llm_analysis_results
+
+---
+
+## 4. Modell trainieren
+
+**Swagger**
+
+```
+http://localhost:8020/__docs__/
+```
+
+```http
+GET /train-full-model
+```
+
+### Ergebnis
+
+- professor_test_comment_results
+- professor_test_thread_results
+- professor_test_user_results
+- professor_test_model_results
+
+---
+
+# Bluesky
+
+## 1. Bluesky-Stream starten
+
+Swagger
+
+```
+http://localhost:8001/docs
+```
+
+Endpoint
+
+```http
+GET /stream?url={post_url}
+```
+
+### Funktion
+
+- Bluesky-Thread laden
+- Kommentare speichern
+- Jetstream starten
+- Neue Kommentare überwachen
+
+### Collections
+
+- threads
+- comments
+
+---
+
+## 2. Automatische Verarbeitung
+
+Bei jedem neuen Kommentar wird automatisch folgender Endpoint aufgerufen:
+
+```http
+POST /pipeline/bluesky/comment-ingested
+```
+
+Dieser startet automatisch:
+
+### LLM-Service
+
+```http
+POST http://llm-service:8011/analyze/thread
+```
+
+Erzeugt
+
+- llm_analysis_results
+
+---
+
+### Analyse-Engine
+
+```http
+GET http://analyse-r:8000/predict-bluesky
+```
+
+Erzeugt
+
+- bluesky_prediction_comments_results
+- bluesky_prediction_thread_results
+- bluesky_prediction_user_results
+- bluesky_prediction_model_results
+
+---
+
+## 3. Vollständigen Bluesky-Datensatz erzeugen
+
+Gesamter Datensatz
+
+```http
+GET /analysis/bluesky/prediction-data
+```
+
+Einzelner Thread
+
+```http
+GET /analysis/bluesky/prediction-data/{thread_id}
+```
+
+---
+
+
+# Gesamtablauf
+
+## Professor
+
+```text
+POST /import/professor
+          │
+          ▼
+POST /analysis/import-professor-llm
+          │
+          ▼
+GET /analysis/training/prof-comments/all
+          │
+          ▼
+GET /train-full-model
+```
+
+---
+
+## Bluesky
+
+```text
+GET /stream?url=...
+
+        │
+        ▼
+
+Kommentare speichern
+
+        │
+        ▼
+
+POST /pipeline/bluesky/comment-ingested
+
+        │
+        ▼
+
+POST http://llm-service:8011/analyze/thread
+
+        │
+        ▼
+
+GET http://analyse-r:8000/predict-bluesky
+
+        │
+        ▼
+
+MongoDB aktualisieren
+```
+
+---
+
+
+
 
 
