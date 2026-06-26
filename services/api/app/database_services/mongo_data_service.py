@@ -819,10 +819,6 @@ def get_latest_comment_context_for_thread(
 
     collection = mongo.collection(ml_collection_name)
 
-    # Alle gespeicherten Analyse-Kommentare zu genau diesem Thread laden.
-    # Quelle ist je nach platform entweder:
-    # - bluesky_prediction_comments_results
-    # - professor_test_comment_results
     results = list(
         collection.find(query).sort([
             ("analysis_saved_at", -1),
@@ -839,8 +835,6 @@ def get_latest_comment_context_for_thread(
             ),
         }
 
-    # Sicherheitsprüfung:
-    # Professor-Thread-IDs können in mehreren source_files vorkommen.
     if not source_file and platform in ["professor", "professor_dataset"]:
         source_files = {
             r.get("source_file")
@@ -858,8 +852,6 @@ def get_latest_comment_context_for_thread(
                 "source_files": sorted(source_files),
             }
 
-    # Falls ein Kommentar mehrfach gespeichert wurde:
-    # pro comment_id nur den neuesten Datensatz behalten.
     latest_by_comment_id = {}
 
     for r in results:
@@ -889,9 +881,6 @@ def get_latest_comment_context_for_thread(
             ),
         }
 
-    # Thread-Reihenfolge herstellen.
-    # Wenn R thread_position_abs liefert, ist das am saubersten.
-    # Sonst fallback auf created_at/comment_id.
     def comment_sort_key(comment: dict):
         position = comment.get("thread_position_abs")
 
@@ -914,12 +903,9 @@ def get_latest_comment_context_for_thread(
 
     comments.sort(key=comment_sort_key)
 
-    # Der letzte Kommentar im Thread-Kontext ist der aktuelle Kommentar
-    # für die Moderation.
     latest_comment_raw = comments[-1]
     latest_comment_id = latest_comment_raw.get("comment_id")
 
-    # Nur die Felder aus deinem gewünschten JSON ausgeben.
     moderation_comment_fields = [
         "comment_id",
         "thread_id",
@@ -980,8 +966,6 @@ def get_latest_comment_context_for_thread(
         for field in moderation_comment_fields
     }
 
-    # Falls source_platform in alten Professor-Ergebnissen fehlt,
-    # trotzdem sauber setzen.
     if latest_comment.get("source_platform") is None:
         latest_comment["source_platform"] = source_platform
 
@@ -993,6 +977,7 @@ def get_latest_comment_context_for_thread(
 
         previous_comments.append({
             "comment_id": c.get("comment_id"),
+            "parent_id": c.get("parent_id"),
             "login": c.get("login"),
             "created_at": c.get("created_at"),
             "text": c.get("text"),
@@ -1004,10 +989,8 @@ def get_latest_comment_context_for_thread(
         "thread_id": thread_id,
         "source_file": source_file or latest_comment.get("source_file"),
 
-        # Genau der Kommentar im flachen Format aus deinem Beispiel
         "latest_comment": latest_comment,
 
-        # Danach die vorherigen Kommentare aus demselben Thread
         "previous_comments_count": len(previous_comments),
         "previous_comments": previous_comments,
     }

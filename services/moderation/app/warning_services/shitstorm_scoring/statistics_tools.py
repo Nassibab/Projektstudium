@@ -1,144 +1,158 @@
 """Statistische Hilfsklassen für das Shitstorm-Barometer.
 
-Hier liegen die p-Wert-Berechnung, p-Wert-Kombination und Transformation
-in normierte Evidenzscores. 
+Neues Verfahren:
+- Jeder Indikator wird gegen seine Rolling-Historie desselben Threads geprüft.
+- Der positive Rolling-z-Score erkennt abrupte Ausschläge.
+- Ein einseitiges CUSUM erkennt langsam auflaufende Eskalation über mehrere Fenster.
 """
 
 from __future__ import annotations
 
 import math
-from typing import Iterable, List
+from dataclasses import dataclass
+from typing import List, Optional
 
-from .models import DimensionCombiner, PValueMethod
+
+@dataclass(frozen=True)
+class RollingSignalResult:
+    """Debug- und Scorewerte für einen einzelnen Indikator."""
+
+    evidence_score: float
+    rolling_mean: Optional[float]
+    rolling_std: Optional[float]
+    z_score: float
+    z_evidence_score: float
+    cusum_value: float
+    cusum_evidence_score: float
+    has_sufficient_history: bool
+    insufficient_history_message: Optional[str] = None
+    method: str = "rolling_z_cusum"
 
 
-class PValueCalculator:
-    """Berechnet obere p-Werte.
+class RollingZCusumDetector:
+    """Berechnet Evidenz aus Rolling-z-Score und einseitigem CUSUM.
 
-    Kleine p-Werte bedeuten: Der aktuelle Wert ist im Vergleich zur bisherigen
-    Thread-Historie auffällig hoch.
+    Intuition:
+    - z_score hoch: aktuelles Fenster liegt deutlich über der eigenen
+      Thread-Vergangenheit.
+    - CUSUM hoch: mehrere Fenster in Folge liegen moderat über der Baseline.
+
+    evidence_score = max(z_evidence_score, cusum_evidence_score)
+    Dadurch reagieren wir sowohl auf plötzliche Peaks als auch auf langsame
+    Shitstorm-Eskalationen.
     """
 
-    def __init__(self, min_history: int = 3, poisson_baseline_floor: float = 0.1):
+    def __init__(
+        self,
+        min_history: int = 3,
+        z_watch: float = 1.0,
+        z_full: float = 3.0,
+        cusum_reference: float = 0.5,
+        cusum_watch: float = 1.5,
+        cusum_full: float = 5.0,
+    ):
+        if min_history < 1:
+            raise ValueError("min_history must be >= 1")
+        if z_full <= z_watch:
+            raise ValueError("z_full must be greater than z_watch")
+        if cusum_full <= cusum_watch:
+            raise ValueError("cusum_full must be greater than cusum_watch")
+        if cusum_reference < 0:
+            raise ValueError("cusum_reference must be >= 0")
+
         self.min_history = min_history
-        self.poisson_baseline_floor = poisson_baseline_floor
+        self.z_watch = z_watch
+        self.z_full = z_full
+        self.cusum_reference = cusum_reference
+        self.cusum_watch = cusum_watch
+        self.cusum_full = cusum_full
 
     def calculate(
         self,
-        method: PValueMethod,
         current_value: float,
         previous_values: List[float],
-    ) -> float:
+        previous_cusum: float = 0.0,
+    ) -> RollingSignalResult:
+        previous_cusum = max(0.0, float(previous_cusum or 0.0))
+
         if len(previous_values) < self.min_history:
-            # Zu wenig Historie: konservativ keine Auffälligkeit behaupten.
-            return 1.0
+            # Zu wenig Historie für eine wissenschaftlich saubere relative Aussage.
+            # Es gibt bewusst keinen absoluten Ersatzscore. Das Ergebnis bleibt
+            # vorläufig und fließt mit Evidenz 0 in das Barometer ein.
+            return RollingSignalResult(
+                evidence_score=0.0,
+                rolling_mean=None,
+                rolling_std=None,
+                z_score=0.0,
+                z_evidence_score=0.0,
+                cusum_value=0.0,
+                cusum_evidence_score=0.0,
+                has_sufficient_history=False,
+                insufficient_history_message=(
+                    f"Noch nicht genug Vergleichsfenster: "
+                    f"{len(previous_values)}/{self.min_history}."
+                ),
+            )
 
-        if method == "poisson":
-            return self._poisson_upper_tail(current_value, previous_values)
+        rolling_mean = self._mean(previous_values)
+        rolling_std = max(
+            self._sample_std(previous_values, rolling_mean),
+            self._adaptive_std_floor(current_value, previous_values),
+        )
 
-        if method == "empirical":
-            return self._empirical_upper_tail(current_value, previous_values)
+        z_score = (current_value - rolling_mean) / rolling_std
 
-        raise ValueError(f"Unknown p-value method: {method}")
+        # Einseitiges positives CUSUM. Negative/kleine z-Werte bauen das Signal ab.
+        cusum_value = max(0.0, previous_cusum + z_score - self.cusum_reference)
 
-    def _poisson_upper_tail(self, current_value: float, previous_values: List[float]) -> float:
-        """P(X >= current_value) bei X ~ Poisson(lambda_baseline)."""
-        current_count = max(0, int(round(current_value)))
-        if current_count <= 0:
-            return 1.0
+        z_evidence = self._z_to_evidence(z_score)
+        cusum_evidence = self._cusum_to_evidence(cusum_value)
 
-        baseline_lambda = sum(previous_values) / len(previous_values)
-        baseline_lambda = max(baseline_lambda, self.poisson_baseline_floor)
-
-        return self._poisson_survival_function(k=current_count, lam=baseline_lambda)
-
-    @staticmethod
-    def _empirical_upper_tail(current_value: float, previous_values: List[float]) -> float:
-        """Empirischer oberer p-Wert mit +1-Korrektur."""
-        at_least_as_extreme = sum(1 for value in previous_values if value >= current_value)
-        return (at_least_as_extreme + 1) / (len(previous_values) + 1)
-
-    @staticmethod
-    def _poisson_survival_function(k: int, lam: float) -> float:
-        """Survival Function P(X >= k) ohne SciPy-Abhängigkeit."""
-        if k <= 0:
-            return 1.0
-
-        try:
-            probability_zero = math.exp(-lam)
-        except OverflowError:
-            return 0.0
-
-        cumulative = probability_zero
-        probability_i = probability_zero
-
-        # cumulative = P(X <= k - 1)
-        for i in range(1, k):
-            probability_i *= lam / i
-            cumulative += probability_i
-
-        survival = 1.0 - cumulative
-        return min(1.0, max(0.0, survival))
-
-"""Nur für Testzwecke"""
-class PValueCombiner:
-    """Kombiniert mehrere Indikator-p-Werte innerhalb einer Dimension.
-
-    Diese Klasse wird für Bonferroni/Fisher genutzt. Für den Mean-Combiner
-    werden nicht p-Werte gemittelt, sondern Evidenzscores im Scorer.
-    """
-
-    def __init__(self, method: DimensionCombiner = "bonferroni"):
-        self.method = method
-
-    def combine(self, p_values: Iterable[float]) -> float:
-        clean_values = [self._clip_p(value) for value in p_values]
-        if not clean_values:
-            return 1.0
-
-        if self.method == "bonferroni":
-            return self._bonferroni(clean_values)
-
-        if self.method == "fisher":
-            return self._fisher(clean_values)
-
-        raise ValueError(
-            f"PValueCombiner cannot combine p-values with method '{self.method}'. "
-            "Use method='bonferroni' or method='fisher'."
+        return RollingSignalResult(
+            evidence_score=max(z_evidence, cusum_evidence),
+            rolling_mean=rolling_mean,
+            rolling_std=rolling_std,
+            z_score=z_score,
+            z_evidence_score=z_evidence,
+            cusum_value=cusum_value,
+            cusum_evidence_score=cusum_evidence,
+            has_sufficient_history=True,
+            insufficient_history_message=None,
         )
 
     @staticmethod
-    def _clip_p(p_value: float) -> float:
-        return min(1.0, max(1e-12, float(p_value)))
+    def _mean(values: List[float]) -> float:
+        return sum(values) / len(values) if values else 0.0
 
     @staticmethod
-    def _bonferroni(p_values: List[float]) -> float:
-        """Konservative Kombination: k * kleinster p-Wert, gedeckelt bei 1."""
-        return min(1.0, len(p_values) * min(p_values))
+    def _sample_std(values: List[float], mean: float) -> float:
+        if len(values) < 2:
+            return 0.0
+        variance = sum((value - mean) ** 2 for value in values) / (len(values) - 1)
+        return math.sqrt(max(0.0, variance))
 
     @staticmethod
-    def _fisher(p_values: List[float]) -> float:
-        """Fisher-Kombination als optionale Sensitivitätsanalyse.
+    def _clip01(value: float) -> float:
+        return min(1.0, max(0.0, float(value)))
+
+    def _z_to_evidence(self, z_score: float) -> float:
+        return self._clip01((z_score - self.z_watch) / (self.z_full - self.z_watch))
+
+    def _cusum_to_evidence(self, cusum_value: float) -> float:
+        return self._clip01((cusum_value - self.cusum_watch) / (self.cusum_full - self.cusum_watch))
+
+    @staticmethod
+    def _adaptive_std_floor(current_value: float, previous_values: List[float]) -> float:
+        """Verhindert explodierende z-Werte bei fast konstanter Historie.
         """
-        try:
-            from scipy.stats import chi2  # type: ignore
-        except ImportError as exc:
-            raise RuntimeError("Fisher combiner requires scipy. Use 'mean' or 'bonferroni' instead.") from exc
+        values = [float(current_value), *[float(value) for value in previous_values]]
+        min_value = min(values)
+        max_value = max(values)
 
-        statistic = -2.0 * sum(math.log(value) for value in p_values)
-        degrees_of_freedom = 2 * len(p_values)
-        return float(chi2.sf(statistic, degrees_of_freedom))
+        if 0.0 <= min_value and max_value <= 1.0:
+            return 0.05
 
+        if 0.0 <= min_value and max_value <= 4.0:
+            return 0.25
 
-class EvidenceTransformer:
-    """Transformiert p-Werte in Evidenzscores zwischen 0 und 1."""
-
-    def __init__(self, p_value_for_full_evidence: float = 0.01):
-        if not 0 < p_value_for_full_evidence < 1:
-            raise ValueError("p_value_for_full_evidence must be between 0 and 1.")
-        self.denominator = -math.log10(p_value_for_full_evidence)
-
-    def transform(self, p_value: float) -> float:
-        p_value = min(1.0, max(1e-12, float(p_value)))
-        evidence = -math.log10(p_value) / self.denominator
-        return min(1.0, max(0.0, evidence))
+        return 1.0
