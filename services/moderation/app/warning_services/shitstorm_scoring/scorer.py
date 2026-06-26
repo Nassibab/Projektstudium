@@ -1,10 +1,18 @@
-"""Hauptlogik für das Shitstorm-Barometer."""
+"""Hauptlogik für das Shitstorm-Barometer.
+
+Aktuelle Variante:
+- keine frei gesetzten absoluten Ersatzwerte,
+- relative Bewertung ausschließlich über Rolling-z-Score und positives CUSUM,
+- bei zu wenig Historie wird das Ergebnis als vorläufig markiert,
+- Barometer-Konstruktion als gewichteter Composite Indicator,
+- finaler Score wird durch Aggression/Toxizität/Negativität nach oben begrenzt.
+"""
 
 from __future__ import annotations
 
 import math
 from collections import defaultdict
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .config import DEFAULT_DIMENSIONS
 from .history import ThreadMetricHistory
@@ -18,19 +26,29 @@ from .models import (
     WarningLevel,
 )
 from .policy import WarningLevelPolicy
-from .statistics_tools import EvidenceTransformer, PValueCalculator, PValueCombiner
+from .statistics_tools import RollingZCusumDetector
 
 
 class ShitstormScorer:
-    """Berechnet ein Shitstorm-Barometer als Composite Indicator.
+    """Berechnet ein Shitstorm-Barometer als relativen Composite Indicator.
 
-    1. Fensterwerte werden relativ zur bisherigen Thread-Historie geprüft.
-    2. Zusätzlich gibt es absolute Evidenzscores, damit frühe Eskalationen nicht
-       fälschlich auf 0 bleiben, nur weil noch keine drei Vergleichsfenster existieren.
-    3. Pro Dimension wird max(relative Evidenz, absolute Evidenz) verwendet.
-    4. Final gilt: Shitstorm braucht Frequenz UND Aggression. Darum wird der
-       gewichtete Dimensionsscore mit einem weichen Core-Gate sqrt(Frequenz * Aggression)
-       multipliziert.
+    Ablauf:
+    1. Jede Fenstermetrik wird relativ zur bisherigen Thread-Historie bewertet.
+    2. Rolling-z erkennt abrupte Peaks.
+    3. Ein einseitiges positives CUSUM erkennt kumulative Eskalationen.
+    4. Pro Indikator gilt: Evidenz = max(z-Evidenz, CUSUM-Evidenz).
+    5. Pro Dimension werden Indikatoren erst innerhalb fachlicher Untergruppen
+       und anschließend über Untergruppen gemittelt.
+    6. Score_raw ist die gewichtete Summe der vier Dimensionsscores:
+       0.25*F + 0.35*A + 0.25*D + 0.15*P.
+    7. Score_final = min(Score_raw, Aggression/Toxizität/Negativität).
+       Dadurch kann der Barometerwert ohne aggressiv-toxischen Kern nicht hoch werden.
+    8. Die Warnstufe wird anschließend über kalibrierbare Schwellen des finalen
+       Barometerwerts abgeleitet.
+
+    Wenn weniger als min_history frühere Fenster vorhanden sind, wird bewusst
+    kein absoluter Fallback verwendet. Der Score bleibt 0 und der Status erklärt,
+    dass noch nicht genug Vergleichsdaten vorliegen.
     """
 
     def __init__(
@@ -39,17 +57,46 @@ class ShitstormScorer:
         min_history: int = 3,
         dimension_combiner: DimensionCombiner = "mean",
         dimensions: Optional[List[DimensionSpec]] = None,
-        p_value_for_full_evidence: float = 0.01,
+        z_watch: float = 1.0,
+        z_full: float = 3.0,
+        cusum_reference: float = 0.5,
+        cusum_watch: float = 1.5,
+        cusum_full: float = 5.0,
+        watch_threshold: float = 0.20,
+        warning_threshold: float = 0.40,
+        critical_threshold: float = 0.60,
     ):
+        if dimension_combiner != "mean":
+            raise ValueError(
+                "Nach der Umstellung auf Rolling-z/CUSUM wird nur "
+                "dimension_combiner='mean' unterstützt. Bonferroni/Fisher "
+                "gehören zur alten p-Wert-Logik."
+            )
+
         self.dimensions = dimensions or DEFAULT_DIMENSIONS
         self._validate_weights(self.dimensions)
 
         self.history = ThreadMetricHistory(history_window_size=history_window_size)
-        self.p_values = PValueCalculator(min_history=min_history)
+        self.detector = RollingZCusumDetector(
+            min_history=min_history,
+            z_watch=z_watch,
+            z_full=z_full,
+            cusum_reference=cusum_reference,
+            cusum_watch=cusum_watch,
+            cusum_full=cusum_full,
+        )
         self.dimension_combiner = dimension_combiner
-        self.p_value_combiner = PValueCombiner(method=dimension_combiner)
-        self.evidence = EvidenceTransformer(p_value_for_full_evidence=p_value_for_full_evidence)
-        self.warning_policy = WarningLevelPolicy()
+        self.warning_policy = WarningLevelPolicy(
+            watch_threshold=watch_threshold,
+            warning_threshold=warning_threshold,
+            critical_threshold=critical_threshold,
+        )
+
+        # CUSUM muss fensterweise gespeichert werden. Bei Live-Auswertung wird
+        # dasselbe Zeitfenster nach jedem neuen Kommentar neu aggregiert; es
+        # darf daher nicht mehrfach als unabhängiger CUSUM-Schritt zählen.
+        self._cusum_history: Dict[Tuple[Any, str], List[Dict[str, Any]]] = defaultdict(list)
+        self._cusum_history_size = history_window_size + 1
 
     def calculate_final_score(self, thread_id: str, metrics: Dict[str, Any]) -> Dict[str, Any]:
         current_window_start = metrics.get("window_start")
@@ -58,24 +105,39 @@ class ShitstormScorer:
             current_window_start=current_window_start,
         )
 
-        relative_dimension_results = self._analyze_dimensions(thread_id, metrics)
-        absolute_dimension_scores = self._absolute_dimension_scores(metrics)
-        dimension_results = self._merge_relative_and_absolute(
-            relative_dimension_results,
-            absolute_dimension_scores,
-        )
+        dimension_results = self._analyze_dimensions(thread_id, metrics)
+        has_sufficient_history = self._has_sufficient_history(dimension_results)
+        aggression_cap = self._aggression_score(dimension_results)
 
-        score_raw = self._calculate_weighted_score(dimension_results)
-        gate = self._calculate_gate(dimension_results)
-        barometer_score = min(1.0, score_raw * gate)
+        if has_sufficient_history:
+            score_raw = self._calculate_weighted_score(dimension_results)
+            barometer_score = self._calculate_aggression_capped_score(score_raw, aggression_cap)
+            cap_applied = barometer_score < score_raw
+            policy_decision = self.warning_policy.evaluate(barometer_score, dimension_results)
+            warning_level = policy_decision["warning_level"]
+            evaluation_status = "ready"
+            evaluation_message = "Rolling-z/CUSUM wurde auf Basis ausreichender Vergleichsfenster berechnet."
+        else:
+            score_raw = 0.0
+            barometer_score = 0.0
+            cap_applied = False
+            warning_level = WarningLevel.NORMAL.value
+            evaluation_status = "insufficient_history"
+            evaluation_message = (
+                "Noch nicht genug vorherige Vergleichsfenster für eine stabile "
+                "relative Rolling-z/CUSUM-Bewertung. Es wird kein absoluter "
+                "Ersatzscore verwendet."
+            )
+            policy_decision = self.warning_policy.evaluate(0.0, dimension_results)
+            policy_decision.update(
+                {
+                    "warning_level": warning_level,
+                    "reason": "insufficient_history_no_absolute_fallback",
+                    "barometer_score": 0.0,
+                }
+            )
+
         barometer_percent = round(barometer_score * 100, 2)
-        warning_level = self.warning_policy.decide(barometer_score, dimension_results)
-
-        absolute_critical = self._absolute_critical_override(metrics)
-        if absolute_critical:
-            barometer_score = max(barometer_score, 0.60)
-            barometer_percent = round(barometer_score * 100, 2)
-            warning_level = WarningLevel.CRITICAL.value
 
         metrics_for_history = dict(metrics)
         metrics_for_history.update(
@@ -83,6 +145,7 @@ class ShitstormScorer:
                 "barometer_score_0_1": round(barometer_score, 4),
                 "shitstorm_barometer": barometer_percent,
                 "warning_level": warning_level,
+                "evaluation_status": evaluation_status,
             }
         )
         self.history.upsert(thread_id, metrics_for_history)
@@ -92,20 +155,16 @@ class ShitstormScorer:
             "barometer_score_0_1": round(barometer_score, 4),
             "shitstorm_barometer": barometer_percent,
             "warning_level": warning_level,
+            "evaluation_status": evaluation_status,
+            "evaluation_message": evaluation_message,
+            "has_sufficient_history": has_sufficient_history,
             "score_raw_0_1": round(score_raw, 4),
-            "gate_0_1": round(gate, 4),
-            "absolute_critical_override": absolute_critical,
+            "score_final_0_1": round(barometer_score, 4),
+            "aggression_cap_0_1": round(aggression_cap, 4),
+            "cap_applied": cap_applied,
             "dimension_scores": {
                 name: round(result.evidence_score, 4)
                 for name, result in dimension_results.items()
-            },
-            "dimension_scores_relative": {
-                name: round(result.evidence_score, 4)
-                for name, result in relative_dimension_results.items()
-            },
-            "dimension_scores_absolute": {
-                name: round(value, 4)
-                for name, value in absolute_dimension_scores.items()
             },
             "dimension_weights": {
                 dimension.name: dimension.weight
@@ -115,13 +174,25 @@ class ShitstormScorer:
                 name: result.as_dict()
                 for name, result in dimension_results.items()
             },
+            "warning_decision": policy_decision,
             "recent_barometer_values": previous_barometer_values,
             "method": {
-                "indicator_p_values": "poisson for count indicators, empirical upper-tail p-values for ratios/scores",
-                "indicator_evidence_transform": "relative E_i = min(1, -log10(p_i) / 2), full relative evidence at p <= 0.01",
-                "absolute_evidence": "predefined saturation functions per theoretical dimension; calibrate thresholds on labeled validation data",
+                "indicator_method": "positive rolling-z-score plus one-sided CUSUM",
+                "indicator_evidence": "E_i = max(E_z, E_CUSUM), both scaled to 0..1",
+                "insufficient_history_handling": (
+                    "No absolute fallback. Until min_history previous windows exist, "
+                    "score remains 0 and evaluation_status='insufficient_history'."
+                ),
                 "dimension_combination": self._method_description(),
-                "aggregation": "Dimension score = max(relative evidence, absolute evidence); Score_raw = weighted sum; final = Score_raw * sqrt(Frequency * Aggression/Toxicity)",
+                "aggregation": (
+                    "Score_raw = 0.25*F + 0.35*A + 0.25*D + 0.15*P; "
+                    "Score_final = min(Score_raw, Aggression/Toxicity); "
+                    "Barometer = Score_final * 100."
+                ),
+                "warning_logic": (
+                    "Threshold-only warning levels on the final aggression-capped "
+                    "barometer score: normal < watch < warning < critical."
+                ),
             },
         }
 
@@ -130,17 +201,15 @@ class ShitstormScorer:
 
         for dimension in self.dimensions:
             indicator_results = self._analyze_indicators(thread_id, metrics, dimension.indicators)
-            p_dimension, evidence_score, subgroup_scores, combiner_name = self._combine_dimension(
-                indicator_results
-            )
+            evidence_score, subgroup_scores = self._hierarchical_mean(indicator_results)
 
             results[dimension.name] = DimensionResult(
                 name=dimension.name,
                 label=dimension.label,
                 weight=dimension.weight,
-                p_value=p_dimension,
+                p_value=None,
                 evidence_score=evidence_score,
-                combiner=combiner_name,
+                combiner="hierarchical_mean_rolling_z_cusum_relative_only",
                 indicators=indicator_results,
                 subgroup_scores=subgroup_scores,
             )
@@ -163,36 +232,73 @@ class ShitstormScorer:
                 indicator.name,
                 current_window_start=current_window_start,
             )
-            p_value = self.p_values.calculate(indicator.method, current_value, previous_values)
-            evidence_score = self.evidence.transform(p_value)
+            previous_cusum = self._previous_cusum_value(
+                thread_id=thread_id,
+                indicator_name=indicator.name,
+                current_window_start=current_window_start,
+            )
+
+            signal = self.detector.calculate(
+                current_value=current_value,
+                previous_values=previous_values,
+                previous_cusum=previous_cusum,
+            )
+            self._upsert_cusum_value(
+                thread_id=thread_id,
+                indicator_name=indicator.name,
+                window_start=current_window_start,
+                cusum_value=signal.cusum_value,
+            )
 
             results[indicator.name] = IndicatorResult(
                 name=indicator.name,
                 current_value=current_value,
                 previous_values=previous_values,
-                p_value=p_value,
-                evidence_score=evidence_score,
-                method=indicator.method,
+                p_value=None,
+                evidence_score=signal.evidence_score,
+                method=signal.method,
                 description=indicator.description,
                 group=indicator.group,
+                rolling_mean=signal.rolling_mean,
+                rolling_std=signal.rolling_std,
+                z_score=signal.z_score,
+                z_evidence_score=signal.z_evidence_score,
+                cusum_value=signal.cusum_value,
+                cusum_evidence_score=signal.cusum_evidence_score,
+                has_sufficient_history=signal.has_sufficient_history,
+                insufficient_history_message=signal.insufficient_history_message,
             )
 
         return results
 
-    def _combine_dimension(
-        self,
-        indicator_results: Dict[str, IndicatorResult],
-    ) -> tuple[Optional[float], float, Dict[str, float], str]:
-        if self.dimension_combiner == "mean":
-            evidence_score, subgroup_scores = self._hierarchical_mean(indicator_results)
-            return None, evidence_score, subgroup_scores, "hierarchical_mean"
+    def _previous_cusum_value(self, thread_id: Any, indicator_name: str, current_window_start: Any) -> float:
+        key = (thread_id, indicator_name)
+        history = [
+            row for row in self._cusum_history[key]
+            if not self._same_window(row.get("window_start"), current_window_start)
+        ]
+        if not history:
+            return 0.0
+        return SafeNumber.to_float(history[-1].get("cusum_value"), 0.0)
 
-        p_dimension = self.p_value_combiner.combine(
-            result.p_value for result in indicator_results.values()
-        )
-        evidence_score = self.evidence.transform(p_dimension)
-        subgroup_scores = self._subgroup_means_for_explanation(indicator_results)
-        return p_dimension, evidence_score, subgroup_scores, self.dimension_combiner
+    def _upsert_cusum_value(
+        self,
+        thread_id: Any,
+        indicator_name: str,
+        window_start: Any,
+        cusum_value: float,
+    ) -> None:
+        key = (thread_id, indicator_name)
+        history = [
+            row for row in self._cusum_history[key]
+            if not self._same_window(row.get("window_start"), window_start)
+        ]
+        history.append({"window_start": window_start, "cusum_value": float(cusum_value)})
+        self._cusum_history[key] = history[-self._cusum_history_size:]
+
+    @staticmethod
+    def _same_window(left: Any, right: Any) -> bool:
+        return str(left) == str(right)
 
     @staticmethod
     def _hierarchical_mean(indicator_results: Dict[str, IndicatorResult]) -> tuple[float, Dict[str, float]]:
@@ -210,133 +316,41 @@ class ShitstormScorer:
         return dimension_score, subgroup_scores
 
     @staticmethod
-    def _subgroup_means_for_explanation(indicator_results: Dict[str, IndicatorResult]) -> Dict[str, float]:
-        subgroup_values: Dict[str, List[float]] = defaultdict(list)
-
-        for result in indicator_results.values():
-            subgroup_values[result.group].append(result.evidence_score)
-
-        return {
-            group: ShitstormScorer._mean(values)
-            for group, values in subgroup_values.items()
-        }
+    def _has_sufficient_history(dimension_results: Dict[str, DimensionResult]) -> bool:
+        indicator_results = [
+            indicator
+            for dimension in dimension_results.values()
+            for indicator in dimension.indicators.values()
+        ]
+        return bool(indicator_results) and all(
+            indicator.has_sufficient_history
+            for indicator in indicator_results
+        )
 
     @staticmethod
     def _mean(values: List[float]) -> float:
         return sum(values) / len(values) if values else 0.0
 
     @staticmethod
-    def _clip01(value: float) -> float:
-        return min(1.0, max(0.0, float(value)))
-
-    @classmethod
-    def _sat(cls, value: Any, low: float, high: float) -> float:
-        value = SafeNumber.to_float(value)
-        if high <= low:
-            return 0.0
-        return cls._clip01((value - low) / (high - low))
-
-    @classmethod
-    def _absolute_dimension_scores(cls, metrics: Dict[str, Any]) -> Dict[str, float]:
-        """Absolute Evidenzscores für frühe Fenster und robuste Mindestinterpretation.
-
-        Die Schwellen sind fachliche Startwerte. Für wissenschaftliche Auswertung: 
-        auf gelabelten Threads per ROC/PR-Kurve oder ordinaler Kalibrierung...
-        """
-        frequency = cls._mean([
-            cls._sat(metrics.get("comment_count"), 3, 15),
-            cls._sat(metrics.get("unique_users"), 2, 8),
-            cls._clip01(SafeNumber.to_float(metrics.get("multi_user_ratio"))),
-        ])
-
-        aggression_toxicity = cls._mean([
-            cls._clip01(SafeNumber.to_float(metrics.get("attack_ratio"))),
-            cls._clip01(SafeNumber.to_float(metrics.get("toxic_ratio"))),
-            cls._clip01(SafeNumber.to_float(metrics.get("attack_score_mean_norm"))),
-            cls._clip01(SafeNumber.to_float(metrics.get("toxicity_score_mean_norm"))),
-            cls._sat(metrics.get("negative_word_count_mean"), 0.5, 3.0),
-            cls._clip01(SafeNumber.to_float(metrics.get("insult_ratio"))),
-            cls._clip01(SafeNumber.to_float(metrics.get("swearword_ratio"))),
-            # Weiches ML-Rollensignal, bewusst niedrig indirekt gewichtet durch Mittelwert.
-            cls._clip01(SafeNumber.to_float(metrics.get("attack_probability_mean"))),
-        ])
-
-        dynamics = cls._mean([
-            cls._clip01(SafeNumber.to_float(metrics.get("recent_attack_rate_3_mean"))),
-            cls._clip01(SafeNumber.to_float(metrics.get("recent_attack_rate_5_mean"))),
-            cls._sat(metrics.get("attack_streak_max"), 1, 5),
-            cls._clip01(SafeNumber.to_float(metrics.get("reply_after_attack_ratio"))),
-        ])
-
-        focus_personalization = cls._mean([
-            cls._sat(metrics.get("direct_address_mean"), 0.0, 2.0),
-            cls._sat(metrics.get("accusation_marker_mean"), 0.0, 1.5),
-            cls._sat(metrics.get("mockery_marker_mean"), 0.0, 1.5),
-            cls._clip01(SafeNumber.to_float(metrics.get("target_recently_attacked_ratio"))),
-        ])
-
-        return {
-            "frequency": frequency,
-            "aggression_toxicity": aggression_toxicity,
-            "dynamics": dynamics,
-            "focus_personalization": focus_personalization,
-        }
-
-    @staticmethod
-    def _merge_relative_and_absolute(
-        relative_results: Dict[str, DimensionResult],
-        absolute_scores: Dict[str, float],
-    ) -> Dict[str, DimensionResult]:
-        merged: Dict[str, DimensionResult] = {}
-
-        for name, result in relative_results.items():
-            absolute_score = absolute_scores.get(name, 0.0)
-            evidence_score = max(result.evidence_score, absolute_score)
-
-            merged[name] = DimensionResult(
-                name=result.name,
-                label=result.label,
-                weight=result.weight,
-                p_value=result.p_value,
-                evidence_score=evidence_score,
-                combiner=f"{result.combiner}+absolute_max",
-                indicators=result.indicators,
-                subgroup_scores={
-                    **result.subgroup_scores,
-                    "relative_model": result.evidence_score,
-                    "absolute_rule": absolute_score,
-                },
-            )
-
-        return merged
-
-    @staticmethod
     def _calculate_weighted_score(dimension_results: Dict[str, DimensionResult]) -> float:
-        return sum(
+        return min(1.0, max(0.0, sum(
             result.weight * result.evidence_score
             for result in dimension_results.values()
-        )
+        )))
 
     @staticmethod
-    def _calculate_gate(dimension_results: Dict[str, DimensionResult]) -> float:
-        frequency = max(0.0, dimension_results["frequency"].evidence_score)
-        aggression = max(0.0, dimension_results["aggression_toxicity"].evidence_score)
-        return math.sqrt(frequency * aggression)
+    def _aggression_score(dimension_results: Dict[str, DimensionResult]) -> float:
+        return min(1.0, max(0.0, dimension_results["aggression_toxicity"].evidence_score))
 
     @staticmethod
-    def _absolute_critical_override(metrics: Dict[str, Any]) -> bool:
-        return (
-            SafeNumber.to_float(metrics.get("comment_count")) >= 10
-            and SafeNumber.to_float(metrics.get("unique_users")) >= 4
-            and SafeNumber.to_float(metrics.get("attack_ratio")) >= 0.70
-            and SafeNumber.to_float(metrics.get("toxic_ratio")) >= 0.60
-            and SafeNumber.to_float(metrics.get("attack_streak_max")) >= 5
-        )
+    def _calculate_aggression_capped_score(score_raw: float, aggression_score: float) -> float:
+        return min(1.0, max(0.0, min(float(score_raw), float(aggression_score))))
 
     def _method_description(self) -> str:
-        if self.dimension_combiner == "mean":
-            return "hierarchical mean of indicator evidence scores: mean within subgroups, then mean across subgroups"
-        return f"{self.dimension_combiner} p-value combination per dimension, then p-value to evidence score"
+        return (
+            "hierarchical mean of relative indicator evidence scores: "
+            "mean within groups, then mean across groups"
+        )
 
     @staticmethod
     def _validate_weights(dimensions: List[DimensionSpec]) -> None:

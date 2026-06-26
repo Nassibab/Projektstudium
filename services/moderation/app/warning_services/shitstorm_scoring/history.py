@@ -18,9 +18,6 @@ class ThreadMetricHistory:
     Historie landen. Stattdessen wird der vorhandene Eintrag für dieses Fenster
     ersetzt.
 
-    Für p-Werte wird außerdem das aktuelle Fenster aus der Vergleichshistorie
-    ausgeschlossen. Der aktuelle Fensterzustand soll nur mit früheren Fenstern
-    verglichen werden, nicht mit früheren Zwischenständen desselben Fensters.
     """
 
     def __init__(self, history_window_size: int = 5):

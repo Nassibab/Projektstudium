@@ -16,6 +16,17 @@ def evaluate_thread_from_api(
     thread_id: str,
     platform: str,
     source_file: str | None = None,
+    window_minutes: int = 5,
+    rolling_window_size: int = 5,
+    min_history: int = 3,
+    z_watch: float = 1.0,
+    z_full: float = 3.0,
+    cusum_reference: float = 0.5,
+    cusum_watch: float = 1.5,
+    cusum_full: float = 5.0,
+    watch_threshold: float = 0.20,
+    warning_threshold: float = 0.40,
+    critical_threshold: float = 0.60,
 ):
     try:
         params = {"platform": platform}
@@ -37,13 +48,25 @@ def evaluate_thread_from_api(
             thread_data=thread_json,
             output_dir="evaluation_results",
             run_name=f"{platform}_{thread_id}",
+            window_minutes=window_minutes,
+            rolling_window_size=rolling_window_size,
+            min_history=min_history,
+            z_watch=z_watch,
+            z_full=z_full,
+            cusum_reference=cusum_reference,
+            cusum_watch=cusum_watch,
+            cusum_full=cusum_full,
+            watch_threshold=watch_threshold,
+            warning_threshold=warning_threshold,
+            critical_threshold=critical_threshold,
         )
 
         return {
             "status": "success",
-            "message": "Thread wurde abgerufen und mit dem neuen Standardvariablen-Format evaluiert.",
+            "message": "Thread wurde abgerufen und mit Rolling-z/CUSUM, Aggressions-Cap und konfigurierbaren Warnschwellen evaluiert.",
             "thread_id": thread_id,
             "platform": platform,
+            "scoring_config": evaluation_result["scoring_config"],
             "summary": evaluation_result["summary"],
             "rows": evaluation_result["rows"],
             "windows": evaluation_result["windows"],
@@ -71,6 +94,9 @@ def evaluate_thread_from_api(
                 "error": str(exc),
             },
         ) from exc
+
+    except HTTPException:
+        raise
 
     except Exception as exc:
         raise HTTPException(
