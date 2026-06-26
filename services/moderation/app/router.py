@@ -198,7 +198,5 @@ def evaluate_thread_route(
         watch_threshold=watch_threshold,
         warning_threshold=warning_threshold,
         critical_threshold=critical_threshold,
-        core_watch_threshold=core_watch_threshold,
-        core_warning_threshold=core_warning_threshold,
-        support_threshold=support_threshold,
+        
     )
