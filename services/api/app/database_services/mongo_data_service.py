@@ -1,6 +1,7 @@
 from collections import defaultdict
 from app.db.mongo import MongoDB
 from datetime import datetime, timezone
+from typing import Any
 
 
 mongo = MongoDB()
@@ -55,7 +56,7 @@ def get_thread_comments_for_llm(
     comment_ids: list[str] | None = None,
 ) -> list[dict]:
 
-    query = {
+    query: dict[str, Any] = {
         "thread_id": thread_id,
         "source_file": source_file,
     }
@@ -428,7 +429,7 @@ def save_analysis_results(payload: dict):
 # ladet nur Kommentare mit LLM-Features zu genau einem Bluesky-Thread 
 #------------------------------------------------------------------------------------
 def get_bluesky_thread_for_prediction(thread_id: str):
-    thread_id_values = [thread_id, str(thread_id)]
+    thread_id_values: list[str | int] = [thread_id, str(thread_id)]
 
     # Falls thread_id in Mongo als Zahl gespeichert wurde
     if str(thread_id).isdigit():
@@ -521,22 +522,22 @@ def get_professor_comments_for_analysis_by_thread(
     thread_id: str,
     source_file: str | None = None,
 ):
-    thread_id_values = [thread_id]
+    thread_id_values: list[str | int] = [thread_id]
 
     if str(thread_id).isdigit():
         thread_id_values.append(int(thread_id))
 
-    comment_query = {
+    comment_query: dict[str, Any] = {
         "source_platform": "professor_dataset",
         "thread_id": {"$in": thread_id_values},
     }
 
-    thread_query = {
+    thread_query: dict[str, Any] = {
         "source_platform": "professor_dataset",
         "thread_id": {"$in": thread_id_values},
     }
 
-    llm_query = {
+    llm_query: dict[str, Any] = {
         "thread_id": {"$in": [str(v) for v in thread_id_values]},
     }
 
@@ -638,7 +639,7 @@ def get_latest_moderation_thread(
             "message": "platform must be either 'bluesky' or 'professor'",
         }
 
-    thread_id_values = [thread_id, str(thread_id)]
+    thread_id_values: list[str | int] = [thread_id, str(thread_id)]
 
     if str(thread_id).isdigit():
         thread_id_values.append(int(thread_id))
@@ -646,7 +647,7 @@ def get_latest_moderation_thread(
     # Duplikate entfernen, aber Reihenfolge behalten
     thread_id_values = list(dict.fromkeys(thread_id_values))
 
-    ml_query = {
+    ml_query: dict[str, Any] = {
         "thread_id": {"$in": thread_id_values},
     }
 
@@ -803,14 +804,14 @@ def get_latest_comment_context_for_thread(
             "message": "platform must be either 'bluesky' or 'professor'",
         }
 
-    thread_id_values = [thread_id, str(thread_id)]
+    thread_id_values: list[str | int] = [thread_id, str(thread_id)]
 
     if str(thread_id).isdigit():
         thread_id_values.append(int(thread_id))
 
     thread_id_values = list(dict.fromkeys(thread_id_values))
 
-    query = {
+    query: dict[str, Any] = {
         "thread_id": {"$in": thread_id_values},
     }
 
