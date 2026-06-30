@@ -134,20 +134,24 @@ export default {
     }
   },
   async mounted() {
-    // 1. Versuche lokale test.json zu laden (falls vorhanden)
+    // 1. Setze initial den Status für die Platzhalter
+    this.status = 'Warte auf Live-Daten vom Backend...';
+
+    // 2. Versuche die test.json zur Laufzeit aus dem public-Ordner zu laden
     try {
-      // Das erfordert, dass die Datei test.json im selben Ordner existiert
-      const testJson = await import('./test.json');
-      if (testJson && testJson.default) {
-        this.data = testJson.default;
-        this.status = 'Geladen (Warte auf Live-Updates...)';
+      const response = await fetch('/test.json');
+      if (response.ok) {
+        const testData = await response.json();
+        this.data = testData;
+        this.status = 'Lokale test.json geladen (Warte auf Live-Updates...)';
+      } else {
+        console.log('Keine lokale test.json gefunden (HTTP ' + response.status + '). Starte mit Platzhaltern.');
       }
     } catch (e) {
-      console.log('Keine lokale test.json gefunden, starte mit leeren Platzhaltern.');
-      this.status = 'Warte auf Live-Daten vom Backend...';
+      console.log('Fehler beim Abrufen der test.json. Starte mit Platzhaltern.');
     }
 
-    // 2. Starte SSE Verbindung für Live Updates
+    // 3. Starte SSE Verbindung für Live Updates aus Redis
     this.connectSSE();
   },
   beforeUnmount() {

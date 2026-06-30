@@ -42,4 +42,4 @@ docker-compose.override.yaml
 
 #Evalution
 services/moderation/app/evaluation_one_thread_results/
-services/frontend/src/test.json
+services/frontend/public/test.json
