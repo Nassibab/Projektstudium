@@ -13,6 +13,10 @@ export default defineConfig({
       '/moderation': { 
         target: 'http://moderation:8000',
         changeOrigin: true
+      },
+      '/api': { 
+        target: 'http://api:8080', // Point this to your API container's port!
+        changeOrigin: true
       }
     }
   }

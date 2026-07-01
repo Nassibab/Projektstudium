@@ -129,48 +129,48 @@ class ModerationWarningService:
             },
         }
 
-  def process_warning_payload(self, payload: dict):
-    """Verarbeitet den Live-Payload aus /moderation/warning.
+    def process_warning_payload(self, payload: dict):
+        """Verarbeitet den Live-Payload aus /moderation/warning.
 
-    Der Payload enthält `latest_comment` plus `previous_comments`. Für die
-    Score-Berechnung wird der aktuelle Kommentar wie bisher verarbeitet;
-    für die neue Gegenrede wird der Verlauf an den Generator weitergereicht.
-    """
-    latest_comment = dict(payload.get("latest_comment") or {})
-    if not latest_comment:
-        raise ValueError("Payload enthält keinen latest_comment.")
+        Der Payload enthält `latest_comment` plus `previous_comments`. Für die
+        Score-Berechnung wird der aktuelle Kommentar wie bisher verarbeitet;
+        für die neue Gegenrede wird der Verlauf an den Generator weitergereicht.
+        """
+        latest_comment = dict(payload.get("latest_comment") or {})
+        if not latest_comment:
+            raise ValueError("Payload enthält keinen latest_comment.")
 
-    previous_comments = payload.get("previous_comments") or []
-    thread = payload.get("thread") or {}
+        previous_comments = payload.get("previous_comments") or []
+        thread = payload.get("thread") or {}
 
-    latest_comment.setdefault(
-        "thread_id",
-        thread.get("thread_id") or payload.get("thread_id"),
-    )
-    latest_comment.setdefault("source_platform", payload.get("platform"))
-    latest_comment.setdefault("source_file", payload.get("source_file"))
-    latest_comment["previous_comments"] = previous_comments
-
-    if not latest_comment.get("thread_context"):
-        latest_comment["thread_context"] = (
-            payload.get("thread_context")
-            or thread.get("text")
-            or thread.get("title")
-            or ""
+        latest_comment.setdefault(
+            "thread_id",
+            thread.get("thread_id") or payload.get("thread_id"),
         )
+        latest_comment.setdefault("source_platform", payload.get("platform"))
+        latest_comment.setdefault("source_file", payload.get("source_file"))
+        latest_comment["previous_comments"] = previous_comments
 
-    result = self.process_comment(latest_comment)
+        if not latest_comment.get("thread_context"):
+            latest_comment["thread_context"] = (
+                payload.get("thread_context")
+                or thread.get("text")
+                or thread.get("title")
+                or ""
+            )
 
-    redis_event = {
-        "event": "moderation_warning_updated",
-        "thread_id": result.get("thread_id"),
-        "comment_id": result.get("comment_id"),
-        "warning_level": result.get("shitstorm_prediction", {}).get("warning_level"),
-        "shitstorm_barometer": result.get("shitstorm_prediction", {}).get("shitstorm_barometer"),
-        "evaluation_status": result.get("shitstorm_prediction", {}).get("evaluation_status"),
-        "payload": result,
-    }
+        result = self.process_comment(latest_comment)
 
-    result["redis_publish"] = push_to_dashboard(redis_event)
+        redis_event = {
+            "event": "moderation_warning_updated",
+            "thread_id": result.get("thread_id"),
+            "comment_id": result.get("comment_id"),
+            "warning_level": result.get("shitstorm_prediction", {}).get("warning_level"),
+            "shitstorm_barometer": result.get("shitstorm_prediction", {}).get("shitstorm_barometer"),
+            "evaluation_status": result.get("shitstorm_prediction", {}).get("evaluation_status"),
+            "payload": result,
+        }
 
-    return result
+        result["redis_publish"] = push_to_dashboard(redis_event)
+
+        return result

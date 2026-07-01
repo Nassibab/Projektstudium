@@ -161,7 +161,7 @@ export default {
   },
   methods: {
     connectSSE() {
-      this.eventSource = new EventSource('/api/schema-stream');
+      this.eventSource = new EventSource('/moderation/schema-stream');
 
       this.eventSource.onopen = () => {
         this.status = 'Verbunden via SSE. Empfange Live-Daten...';
@@ -169,6 +169,7 @@ export default {
 
       this.eventSource.onmessage = (event) => {
         try {
+          console.log("🔥 NEUE DATEN AUS REDIS:", event.data); // HIER HINZUFÜGEN
           this.data = JSON.parse(event.data);
           this.status = 'Daten zuletzt aktualisiert: ' + new Date().toLocaleTimeString();
         } catch (e) {
