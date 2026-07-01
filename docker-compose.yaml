@@ -115,6 +115,8 @@ services:
     environment:
       API_URL: http://api:8000
       LLMAPI_KEY: ${LLMAPI_KEY}
+      REDIS_URL: redis://redis:6379/0
+      REDIS_CHANNEL: thread_updates
     restart: unless-stopped
 
 volumes:
