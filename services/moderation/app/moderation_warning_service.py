@@ -1,3 +1,5 @@
+from unittest import result
+
 from app.warning_services.window_store import WindowStore
 from app.warning_services.window_aggregator import WindowAggregator
 from app.warning_services.shitstorm_scoring.scorer import ShitstormScorer
@@ -161,16 +163,6 @@ class ModerationWarningService:
 
         result = self.process_comment(latest_comment)
 
-        redis_event = {
-            "event": "moderation_warning_updated",
-            "thread_id": result.get("thread_id"),
-            "comment_id": result.get("comment_id"),
-            "warning_level": result.get("shitstorm_prediction", {}).get("warning_level"),
-            "shitstorm_barometer": result.get("shitstorm_prediction", {}).get("shitstorm_barometer"),
-            "evaluation_status": result.get("shitstorm_prediction", {}).get("evaluation_status"),
-            "payload": result,
-        }
-
-        result["redis_publish"] = push_to_dashboard(redis_event)
+        push_to_dashboard(result)
 
         return result

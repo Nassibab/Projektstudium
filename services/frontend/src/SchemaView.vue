@@ -168,12 +168,26 @@ export default {
       };
 
       this.eventSource.onmessage = (event) => {
+        // SSE sends a ping to keep the connection alive. We want to ignore it.
+        if (event.data === "ping") {
+            console.log("📡 Ping empfangen (Verbindung wird gehalten)");
+            return; 
+        }
+
         try {
-          console.log("🔥 NEUE DATEN AUS REDIS:", event.data); // HIER HINZUFÜGEN
-          this.data = JSON.parse(event.data);
+          // 1. String in ein echtes JavaScript-Objekt umwandeln
+          const parsedData = JSON.parse(event.data);
+          
+          // 2. Das fertige Objekt übersichtlich in der Konsole ausgeben
+          console.log("🔥 NEUE DATEN AUS REDIS:", parsedData); 
+          
+          // 3. Dem Dashboard die neuen Daten zuweisen
+          this.data = parsedData;
           this.status = 'Daten zuletzt aktualisiert: ' + new Date().toLocaleTimeString();
+          
         } catch (e) {
           console.error("Fehler beim Parsen der JSON-Daten:", e);
+          console.error("Der fehlerhafte String war:", event.data); // Hilft beim Debuggen
         }
       };
 
