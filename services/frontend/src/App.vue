@@ -129,6 +129,10 @@
         <p v-else>Bitte Evaluation starten.</p>
       </div>
     </div>
+
+    <div class="loading" v-else>
+      <p>Fetching website data...</p>
+    </div>
   </div>
 </template>
 
