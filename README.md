@@ -1,3 +1,7 @@
+# Project Description
+The project is an early-warning and analysis system for toxic social-media discussions: Live Bluesky comments are collected and stored in a database. They are then enriched by an LLM with linguistic features such as irony and evaluated by an ML model using these additional features. Afterwards, toxicity scores are calculated across different time periods to detect a potential "shitstorm." Finally, in the moderation component, the LLM suggests situation-specific countermeasures, such as deleting a comment or post, providing an explanation, or blocking a user.
+
+
 # Group Project Template (API + Vue Frontend)
 
 ## Markdown Preview Shortcuts
